@@ -1,0 +1,15 @@
+services:
+  transfer-db:
+    image: postgres:17
+    container_name: transfer-db
+    environment:
+      POSTGRES_DB: transfer
+      POSTGRES_USER: transfer
+      POSTGRES_PASSWORD: ${TRANSFER_DB_PASSWORD:-transfer_dev}
+    ports:
+      - "5433:5432"
+    volumes:
+      - transfer-db-data:/var/lib/postgresql/data
+
+volumes:
+  transfer-db-data:
