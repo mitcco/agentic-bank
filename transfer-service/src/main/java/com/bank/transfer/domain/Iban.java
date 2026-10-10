@@ -1,25 +1,22 @@
 package com.bank.transfer.domain;
 
-import io.micrometer.common.util.StringUtils;
+import java.util.Locale;
 
-public final class Iban {
+public record Iban(String value) {
 
-  private final String value;
+  private static final int LENGTH = 27;
 
-  public Iban(String value) {
-    if (!StringUtils.isBlank(value)) {
+  public Iban {
+    if (value == null || value.isBlank()) {
       throw new IllegalArgumentException("Value not compliant");
     }
-    String normalizedIban = value.strip().toUpperCase();
-    if (normalizedIban.length() != 27) {
-      throw new IllegalArgumentException("Malformed IBAN, it has to be 27 characters");
+    String normalized = value.replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+    if (normalized.length() != LENGTH) {
+      throw new IllegalArgumentException("Malformed IBAN, it has to be " + LENGTH + " characters");
     }
-
-    this.value = normalizedIban;
+    if (!normalized.matches("[A-Z]{2}[0-9]{2}[A-Z0-9]+")) {
+      throw new IllegalArgumentException("Malformed IBAN, invalid characters");
+    }
+    value = normalized;
   }
-
-  public String value() {
-    return value;
-  }
-
 }
