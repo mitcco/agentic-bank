@@ -29,7 +29,7 @@ Tutti i campi sono obbligatori
 |---|---|---|
 | `transferId` | stringa | identificativo del bonifico nel Transfer: stringa non vuota, di cui il Fraud non valida il formato (il Transfer usa un UUID). Serve solo per tracciabilità e non influisce sulla decisione |
 | `sourceIban` | stringa | IBAN del conto di origine: 27 caratteri, formato `[A-Z]{2}[0-9]{2}[A-Z0-9]+`. Spazi e minuscole vengono normalizzati (spazi rimossi, maiuscolo) |
-| `destinationIban` | stringa | IBAN del conto di destinazione, stesso formato |
+| `destinationIban` | stringa | IBAN del conto di destinazione, stesso formato. Deve essere diverso da `sourceIban`: il confronto avviene dopo la normalizzazione |
 | `amount` | numero | maggiore di zero, separatore decimale `.`, massimo 2 decimali |
 | `currency` | stringa | codice ISO 4217 di 3 lettere. Il confronto è esatto: è supportata solo `EUR` (vedi sezione 6) |
 
@@ -68,7 +68,7 @@ nel caso di rejected
 
 ## 6. Regole di valutazione
 Il servizio decide in base a più parametri:
-- sopra i 10000 EUR la transazione non è valida (un importo uguale alla soglia è ammesso), come reasons "Amount must not exceed 10000 EUR". Il testo è fisso e non riporta la soglia configurata;
+- sopra i 10000 EUR la transazione non è valida (un importo uguale alla soglia è ammesso), come reasons "Amount must not exceed <soglia> EUR", dove `<soglia>` è la soglia configurata scritta senza zeri finali (con soglia 10000: "Amount must not exceed 10000 EUR");
 - IBAN bloccati, sia per il mittente che per il destinatario "X IBAN is locked", dove X è "Source" o "Destination" a seconda dei casi;
 - se scattano più validazioni, vengono restituite tutte, nell'ordine: importo, mittente, destinatario;
 - la valuta supportata è solo `EUR`: una valuta diversa non viene valutata e dà l'errore `400 UNSUPPORTED_CURRENCY` (sezione 7).
@@ -82,6 +82,7 @@ valutazione: il bonifico non è né `ALLOWED` né `REJECTED`.
 | `400` | Corpo non leggibile come JSON | `MALFORMED_REQUEST` |
 | `400` | Campo obbligatorio mancante o nullo | `INVALID_REQUEST` |
 | `400` | IBAN non valido (vuoto o formato errato) | `INVALID_REQUEST` |
+| `400` | `sourceIban` e `destinationIban` uguali (dopo la normalizzazione) | `INVALID_REQUEST` |
 | `400` | `amount` minore o uguale a zero, oppure con più di 2 decimali | `INVALID_REQUEST` |
 | `400` | `currency` diversa da `EUR` (valuta non supportata, vedi sezione 6) | `UNSUPPORTED_CURRENCY` |
 | `415` | `Content-Type` diverso da `application/json` | `UNSUPPORTED_MEDIA_TYPE` |
@@ -199,6 +200,7 @@ Dati di prova: IBAN bloccato `IT60X0542811101000000000099`; IBAN ordinari
 | 13 | Corpo non JSON | testo qualunque | `400`, `MALFORMED_REQUEST` |
 | 14 | Tipo di contenuto errato | `Content-Type: text/plain` | `415`, `UNSUPPORTED_MEDIA_TYPE` |
 | 15 | Idempotenza | stessa richiesta del caso 3, due volte | stessa risposta entrambe le volte |
+| 16 | IBAN uguali | `sourceIban` e `destinationIban` uguali, anche se scritti con spazi o minuscole diverse | `400`, `INVALID_REQUEST` |
 
 **Dal lato del Transfer** (con un Fraud service finto)
 

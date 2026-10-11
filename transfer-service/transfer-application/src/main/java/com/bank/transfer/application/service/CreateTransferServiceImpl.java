@@ -49,18 +49,19 @@ public class CreateTransferServiceImpl implements CreateTransferInPort {
     requireExistingAccount(dest, "Destination Account not found");
 
     FraudCheckResultDto fraudCheckResultDto =
-      fraudCheckOutPort.checkFraud(source.value(), dest.value(), money.amount(), money.currency());
+      fraudCheckOutPort.checkFraud(transfer.id(), source.value(), dest.value(), money.amount(),
+        money.currency());
 
     return transactionTemplate.execute(status -> {
       if (FraudStatusEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
         Transfer completed = completeTransfer(transfer);
 
-        return new TransferResultDto(completed.id(), completed.status().name(), fraudCheckResultDto.reason());
+        return new TransferResultDto(completed.id(), completed.status().name(), fraudCheckResultDto.reasons());
       }
       Transfer rejected = transfer.reject();
       transferRepositoryOutPort.save(rejected);
 
-      return new TransferResultDto(rejected.id(), rejected.status().name(), fraudCheckResultDto.reason());
+      return new TransferResultDto(rejected.id(), rejected.status().name(), fraudCheckResultDto.reasons());
     });
   }
 

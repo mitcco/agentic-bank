@@ -1,5 +1,7 @@
 package com.bank.transfer.web.dto.response;
 
-public record TransferResponseDto(String transferId, String transferStatus, String reason) {
+import java.util.List;
+
+public record TransferResponseDto(String transferId, String transferStatus, List<String> reasons) {
 
 }
