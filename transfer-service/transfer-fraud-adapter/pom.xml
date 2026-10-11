@@ -7,12 +7,23 @@
 		<artifactId>transfer-service</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>adapter-notification</artifactId>
+	<artifactId>transfer-fraud-adapter</artifactId>
 
 	<dependencies>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>application</artifactId>
+			<artifactId>transfer-application</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.junit.jupiter</groupId>
+			<artifactId>junit-jupiter</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<dependency>
+			<groupId>org.assertj</groupId>
+			<artifactId>assertj-core</artifactId>
+			<scope>test</scope>
 		</dependency>
 	</dependencies>
 

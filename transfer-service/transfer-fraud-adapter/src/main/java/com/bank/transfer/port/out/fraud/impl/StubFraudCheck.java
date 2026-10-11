@@ -1,8 +1,8 @@
-package com.bank.transfer.adapter.out.fraud;
+package com.bank.transfer.port.out.fraud.impl;
 
 import com.bank.transfer.application.dto.FraudCheckResultDto;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
-import com.bank.transfer.domain.FraudDecisionEnum;
+import com.bank.transfer.domain.FraudStatusEnum;
 import com.bank.transfer.domain.Iban;
 import java.math.BigDecimal;
 import java.util.Set;
@@ -27,18 +27,18 @@ public class StubFraudCheck implements FraudCheckOutPort {
   @Override
   public FraudCheckResultDto checkFraud(String sourceIban, String destIban, BigDecimal amount, String currency) {
     if (amount.compareTo(threshold) > 0)  {
-      return new FraudCheckResultDto(FraudDecisionEnum.REJECTED, String.format(EXCEEDS_THRESHOLD, threshold));
+      return new FraudCheckResultDto(FraudStatusEnum.REJECTED, String.format(EXCEEDS_THRESHOLD, threshold));
     }
     Iban source = new Iban(sourceIban);
     Iban dest = new Iban(destIban);
 
     if (blockedIbans.contains(source)) {
-      return new FraudCheckResultDto(FraudDecisionEnum.REJECTED, SOURCE_BLOCKED);
+      return new FraudCheckResultDto(FraudStatusEnum.REJECTED, SOURCE_BLOCKED);
     }
     if (blockedIbans.contains(dest)) {
-      return new FraudCheckResultDto(FraudDecisionEnum.REJECTED, DEST_BLOCKED);
+      return new FraudCheckResultDto(FraudStatusEnum.REJECTED, DEST_BLOCKED);
     }
 
-    return new FraudCheckResultDto(FraudDecisionEnum.ALLOWED, "");
+    return new FraudCheckResultDto(FraudStatusEnum.ALLOWED, "");
   }
 }
