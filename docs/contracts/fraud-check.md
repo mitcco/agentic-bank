@@ -68,7 +68,7 @@ nel caso di rejected
 
 ## 6. Regole di valutazione
 Il servizio decide in base a più parametri:
-- sopra i 10000 EUR la transazione non è valida (un importo uguale alla soglia è ammesso), come reasons "Amount must not exceed 10000 EUR". Il testo è fisso e non riporta la soglia configurata;
+- sopra i 10000 EUR la transazione non è valida (un importo uguale alla soglia è ammesso), come reasons "Amount must not exceed <soglia> EUR", dove `<soglia>` è la soglia configurata scritta senza zeri finali (con soglia 10000: "Amount must not exceed 10000 EUR");
 - IBAN bloccati, sia per il mittente che per il destinatario "X IBAN is locked", dove X è "Source" o "Destination" a seconda dei casi;
 - se scattano più validazioni, vengono restituite tutte, nell'ordine: importo, mittente, destinatario;
 - la valuta supportata è solo `EUR`: una valuta diversa non viene valutata e dà l'errore `400 UNSUPPORTED_CURRENCY` (sezione 7).

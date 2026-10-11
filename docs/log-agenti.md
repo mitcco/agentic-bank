@@ -8,3 +8,7 @@ paragonare l'effort per la creazione del progetto maven tra agent e un semplice 
 non avrebbe senso;
 
 - la struttura prodotta non ha necessitato di modifiche manuali.
+
+
+**Dominio Fraud**
+- i controlli fatti dal reviewer fanno emergere incongruenze e possibili casi funzionali scoperti;
