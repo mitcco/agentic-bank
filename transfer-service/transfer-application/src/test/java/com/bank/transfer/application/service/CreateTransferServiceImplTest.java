@@ -19,7 +19,7 @@ import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.application.port.out.TransferRepositoryOutPort;
 import com.bank.transfer.domain.Account;
-import com.bank.transfer.domain.FraudDecisionEnum;
+import com.bank.transfer.domain.FraudStatusEnum;
 import com.bank.transfer.domain.Iban;
 import com.bank.transfer.domain.Money;
 import com.bank.transfer.domain.Transfer;
@@ -81,7 +81,7 @@ class CreateTransferServiceImplTest {
     }
   }
 
-  private void givenFraudDecision(FraudDecisionEnum decision, String reason) {
+  private void givenFraudDecision(FraudStatusEnum decision, String reason) {
     lenient().when(fraudCheck.checkFraud(anyString(), anyString(), any(BigDecimal.class), anyString()))
       .thenReturn(new FraudCheckResultDto(decision, reason));
   }
@@ -89,7 +89,7 @@ class CreateTransferServiceImplTest {
   @Test
   void validTransferMovesTheMoneyAndSavesEverythingAfterTheFraudCheck() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.ALLOWED, "");
+    givenFraudDecision(FraudStatusEnum.ALLOWED, "");
 
     TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
 
@@ -111,7 +111,7 @@ class CreateTransferServiceImplTest {
   @Test
   void fraudCheckIsAskedBeforeAnySaveAndTheAccountsAreLockedBeforeBeingSaved() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.ALLOWED, "");
+    givenFraudDecision(FraudStatusEnum.ALLOWED, "");
 
     service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
 
@@ -126,7 +126,7 @@ class CreateTransferServiceImplTest {
   @Test
   void accountsAreLockedInIbanOrderWhateverTheDirectionOfTheTransfer() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.ALLOWED, "");
+    givenFraudDecision(FraudStatusEnum.ALLOWED, "");
 
     // the source is the greater IBAN, but the smaller one has to be locked first
     service.executeTransfer(command(DEST_IBAN, SOURCE_IBAN, "30"));
@@ -139,7 +139,7 @@ class CreateTransferServiceImplTest {
   @Test
   void rejectedTransferIsSavedAsRejectedAndTheAccountsAreNotTouched() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.REJECTED, "Amount must not exceed 10");
+    givenFraudDecision(FraudStatusEnum.REJECTED, "Amount must not exceed 10");
 
     TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
 
@@ -156,7 +156,7 @@ class CreateTransferServiceImplTest {
   @Test
   void insufficientFundsSavesNothingAndRollsBack() {
     givenAccounts(account("acc-1", SOURCE, "10", "EUR"), account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.ALLOWED, "");
+    givenFraudDecision(FraudStatusEnum.ALLOWED, "");
 
     assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
       .isInstanceOf(InsufficientFundException.class);
@@ -170,7 +170,7 @@ class CreateTransferServiceImplTest {
   @Test
   void differentCurrencyOnTheDestinationSavesNothingNotEvenTheSource() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "USD"));
-    givenFraudDecision(FraudDecisionEnum.ALLOWED, "");
+    givenFraudDecision(FraudStatusEnum.ALLOWED, "");
 
     assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
       .isInstanceOf(DifferentCurrencyException.class);
@@ -193,7 +193,7 @@ class CreateTransferServiceImplTest {
   @Test
   void missingSourceAccountIsRefusedWithoutAskingTheFraudCheck() {
     givenAccounts(account("acc-2", DEST, "50", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.REJECTED, "Amount must not exceed 10");
+    givenFraudDecision(FraudStatusEnum.REJECTED, "Amount must not exceed 10");
 
     assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
       .isInstanceOf(AccountNotFoundException.class)
@@ -206,7 +206,7 @@ class CreateTransferServiceImplTest {
   @Test
   void missingDestinationAccountIsRefusedWithoutAskingTheFraudCheck() {
     givenAccounts(account("acc-1", SOURCE, "100", "EUR"));
-    givenFraudDecision(FraudDecisionEnum.REJECTED, "Amount must not exceed 10");
+    givenFraudDecision(FraudStatusEnum.REJECTED, "Amount must not exceed 10");
 
     assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
       .isInstanceOf(AccountNotFoundException.class)

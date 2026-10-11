@@ -9,7 +9,7 @@ import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.application.port.out.TransferRepositoryOutPort;
 import com.bank.transfer.domain.Account;
-import com.bank.transfer.domain.FraudDecisionEnum;
+import com.bank.transfer.domain.FraudStatusEnum;
 import com.bank.transfer.domain.Iban;
 import com.bank.transfer.domain.Money;
 import com.bank.transfer.domain.Transfer;
@@ -52,7 +52,7 @@ public class CreateTransferServiceImpl implements CreateTransferInPort {
       fraudCheckOutPort.checkFraud(source.value(), dest.value(), money.amount(), money.currency());
 
     return transactionTemplate.execute(status -> {
-      if (FraudDecisionEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
+      if (FraudStatusEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
         Transfer completed = completeTransfer(transfer);
 
         return new TransferResultDto(completed.id(), completed.status().name(), fraudCheckResultDto.reason());

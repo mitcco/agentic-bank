@@ -7,12 +7,12 @@
 		<artifactId>transfer-service</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>application</artifactId>
+	<artifactId>transfer-application</artifactId>
 
 	<dependencies>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>domain</artifactId>
+			<artifactId>transfer-domain</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.mapstruct</groupId>
