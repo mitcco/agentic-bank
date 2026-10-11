@@ -186,15 +186,14 @@ class CheckTransferServiceImplTest {
     }
 
     @Test
-    void mittenteUgualeDestinatarioBloccato_nessunaEccezioneDueMotiviEInsiemeDiUnElemento() {
+    void mittenteUgualeDestinatarioBloccato_invalidRequestEPortaNonChiamata() {
+        // Specifica cambiata (caso 16): prima S16 attendeva REJECTED con due motivi e una
+        // chiamata alla porta con insieme di 1 elemento. Ora l'errore arriva prima della porta.
         port.blocking(BLOCKED);
 
-        FraudCheckResponseDto r = service.checkTransfer(request(BLOCKED, BLOCKED, "100"));
-
-        assertThat(r.status()).isEqualTo("REJECTED");
-        assertThat(r.reasons()).containsExactly(SOURCE_MSG, DEST_MSG);
-        assertThat(port.calls()).hasSize(1);
-        assertThat(port.calls().get(0)).hasSize(1);
+        assertThatThrownBy(() -> service.checkTransfer(request(BLOCKED, BLOCKED, "100")))
+                .isInstanceOf(InvalidFraudRequestException.class);
+        assertThat(port.calls()).isEmpty();
     }
 
     @Test

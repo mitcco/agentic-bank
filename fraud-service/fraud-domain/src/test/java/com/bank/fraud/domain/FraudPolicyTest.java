@@ -144,11 +144,11 @@ class FraudPolicyTest {
     }
 
     @Test
-    void mittenteUgualeADestinatarioBloccato_dueMotivi() {
-        FraudAssessment a = policy.assess(transfer(ID, BLOCKED, BLOCKED, "100"), blockedOnly);
-
-        assertThat(a.reasons()).containsExactly(
-                FraudReasonEnum.SOURCE_IBAN_LOCKED, FraudReasonEnum.DESTINATION_IBAN_LOCKED);
+    void mittenteUgualeADestinatarioBloccato_nonEPiuCostruibileEQuindiNonValutabile() {
+        // Specifica cambiata (caso 16): prima P13 attendeva due motivi (Source poi Destination).
+        // Ora il TransferToAssess con IBAN uguali non esiste: la policy non puo' riceverlo.
+        assertThatThrownBy(() -> transfer(ID, BLOCKED, BLOCKED, "100"))
+                .isInstanceOf(InvalidFraudRequestException.class);
     }
 
     @Test

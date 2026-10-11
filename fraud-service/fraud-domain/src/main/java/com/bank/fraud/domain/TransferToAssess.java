@@ -23,6 +23,9 @@ public record TransferToAssess(String transferId, Iban source, Iban destination,
         if (amount.amount().signum() <= 0) {
             throw new InvalidFraudRequestException("Amount must be greater than 0");
         }
+        if (source.equals(destination)) {
+            throw new InvalidFraudRequestException("Source and destination IBAN must be different");
+        }
         if (!SUPPORTED_CURRENCY.equals(amount.currency())) {
             throw new UnsupportedCurrencyException("Only EUR is supported");
         }

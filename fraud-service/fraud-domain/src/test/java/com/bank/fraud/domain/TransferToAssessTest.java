@@ -52,9 +52,26 @@ class TransferToAssessTest {
     }
 
     @Test
-    void mittenteUgualeADestinatarioEAccettato() {
-        assertThatCode(() -> new TransferToAssess(ID, iban1(), iban1(), money("1", "EUR")))
-                .doesNotThrowAnyException();
+    void rifiutaMittenteUgualeADestinatario() {
+        // Specifica cambiata (contratto fraud-check, sezione 4/7, caso 16): prima era accettato.
+        assertThatThrownBy(() -> new TransferToAssess(ID, iban1(), iban1(), money("1", "EUR")))
+                .isInstanceOf(InvalidFraudRequestException.class);
+    }
+
+    @Test
+    void rifiutaMittenteUgualeADestinatario_ancheSeScrittiConSpaziEMinuscoleDiverse() {
+        Iban source = new Iban(IBAN_1);
+        Iban destination = new Iban(" it60 x054 2811 1010 0000 0000 001 ");
+
+        assertThatThrownBy(() -> new TransferToAssess(ID, source, destination, money("1", "EUR")))
+                .isInstanceOf(InvalidFraudRequestException.class);
+    }
+
+    @Test
+    void rifiutaMittenteUgualeADestinatario_ilMessaggioNonContieneLIban() {
+        assertThatThrownBy(() -> new TransferToAssess(ID, iban1(), iban1(), money("1", "EUR")))
+                .isInstanceOf(InvalidFraudRequestException.class)
+                .message().doesNotContain(IBAN_1).doesNotContain("0542811101");
     }
 
     @Test
@@ -117,6 +134,22 @@ class TransferToAssessTest {
     void importoZeroConValutaNonSupportata_vinceLInputNonValido() {
         assertThatThrownBy(() -> new TransferToAssess(ID, iban1(), iban2(), money("0", "USD")))
                 .isInstanceOf(InvalidFraudRequestException.class);
+    }
+
+    @Test
+    void ibanUgualiConValutaUsd_vinceLInputNonValidoENonLaValuta() {
+        assertThatThrownBy(() -> new TransferToAssess(ID, iban1(), iban1(), money("100", "USD")))
+                .isInstanceOf(InvalidFraudRequestException.class)
+                .isNotInstanceOf(UnsupportedCurrencyException.class);
+    }
+
+    @Test
+    void ibanUgualiScrittiConSpaziEMinuscoleDiverseConValutaUsd_vinceLInputNonValidoENonLaValuta() {
+        Iban destination = new Iban(" it60 x054 2811 1010 0000 0000 001 ");
+
+        assertThatThrownBy(() -> new TransferToAssess(ID, iban1(), destination, money("100", "USD")))
+                .isInstanceOf(InvalidFraudRequestException.class)
+                .isNotInstanceOf(UnsupportedCurrencyException.class);
     }
 
     @Test

@@ -10,7 +10,7 @@ La fonte di verità è `docs/contracts/fraud-check.md`: endpoint, formato di
 richiesta e risposta, regole di valutazione, errori, esempi di scenari.
 - Se codice e contratto divergono, non scegliere tu: segnala la divergenza.
   Si corregge il codice oppure si apre una modifica esplicita al contratto.
-- I casi 1-15 della sezione 11 del contratto sono i test del Fraud service:
+- I casi 1-16 della sezione 11 del contratto sono i test del Fraud service:
   ogni riga diventa almeno un test.
 - I testi dei motivi (`reasons`) sono quelli del contratto, alla lettera.
 
