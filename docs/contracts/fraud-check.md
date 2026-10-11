@@ -1,7 +1,7 @@
 # Contratto: controllo antifrode
 
 ## 1. Scopo
-Questo contratto definisce com il transfer-service chiede al fraud-service se un bonifico è consentito. Il transfer invia
+Questo contratto definisce come il transfer-service chiede al fraud-service se un bonifico è consentito. Il transfer invia
 i dati essenziali del bonifico (IBAN del mittente, IBAN del destinatario, importo e valuta), il fraud-service risponde con "ALLOWED"
 o "REJECTED", nel secondo caso fornisce anche una, o più, motivazioni.
 
@@ -22,61 +22,56 @@ altri servizi avessero bisogno del controllo antifrode, useranno lo stesso contr
 I dati del bonifico viaggiano nel corpo della richiesta e non nell'URL, perché
 contengono IBAN e importi che non devono comparire nei log degli intermediari.
 
-richiesta è: 
-
-Il Dto di risposta (FraudDto) sarà:
-
-
 ## 4. Richiesta
 Tutti i campi sono obbligatori
 
 | Campo | Tipo JSON | Formato e vincoli |
 |---|---|---|
-| `transferId` | stringa | identificativo del bonifico nel Transfer (UUID, 36 caratteri). Serve solo per tracciabilità e non influisce sulla decisione |
-| `sourceIban` | stringa | IBAN del conto di origine, senza spazi, maiuscolo |
+| `transferId` | stringa | identificativo del bonifico nel Transfer: stringa non vuota, di cui il Fraud non valida il formato (il Transfer usa un UUID). Serve solo per tracciabilità e non influisce sulla decisione |
+| `sourceIban` | stringa | IBAN del conto di origine: 27 caratteri, formato `[A-Z]{2}[0-9]{2}[A-Z0-9]+`. Spazi e minuscole vengono normalizzati (spazi rimossi, maiuscolo) |
 | `destinationIban` | stringa | IBAN del conto di destinazione, stesso formato |
 | `amount` | numero | maggiore di zero, separatore decimale `.`, massimo 2 decimali |
-| `currency` | stringa | codice ISO 4217 di 3 lettere (es. `EUR`) |
+| `currency` | stringa | codice ISO 4217 di 3 lettere. Il confronto è esatto: è supportata solo `EUR` (vedi sezione 6) |
 
 esempio:
 {
-"transferId": "123456789IT60X0542811101000000000001"
+"transferId": "3f2b8c1e-9a47-4d6b-b5e2-1c8a7d0f4e93",
 "sourceIban": "IT60X0542811101000000000001",
 "destinationIban": "IT60X0542811101000000000002",
-"amount": 100.,25,
+"amount": 100.25,
 "currency": "EUR"
 }
 
 ## 5. Risposta di successo
 Codice HTTP `200` per entrambi gli esiti: un rifiuto antifrode è una risposta
-valida, non un errore. Tutti i campi sono obbligatori tranne reason
+valida, non un errore. Tutti i campi sono obbligatori tranne reasons
 
 | Campo | Tipo JSON | Formato e vincoli |
 |---|---|---|
-| `transferId` | stringa | identificativo del bonifico nel Transfer (UUID, 36 caratteri). Serve solo per tracciabilità e non influisce sulla decisione |
-| `status` | stringa | risultato della validazione antri frode, in maiuscolo |
-| `reason` | array di stringhe | presente solo con status REJECTED, elenca una o più motivazioni che hanno portato al blocco della transazione |
+| `transferId` | stringa | identificativo ricevuto nella richiesta, restituito identico. Serve solo per tracciabilità e non influisce sulla decisione |
+| `status` | stringa | risultato della validazione antifrode: `ALLOWED` o `REJECTED`, in maiuscolo |
+| `reasons` | array di stringhe | presente solo con status REJECTED, elenca una o più motivazioni che hanno portato al blocco della transazione |
 esempio:
 
 nel caso di allowed
 {
-"transferId": "123456789IT60X0542811101000000000001"
+"transferId": "3f2b8c1e-9a47-4d6b-b5e2-1c8a7d0f4e93",
 "status": "ALLOWED"
 }
 
 nel caso di rejected
 {
-"transferId": "123456789IT60X0542811101000000000001"
+"transferId": "3f2b8c1e-9a47-4d6b-b5e2-1c8a7d0f4e93",
 "status": "REJECTED",
-"reason" : ["Source IBAN is locked", "Destination IBAN is locked"]
+"reasons" : ["Source IBAN is locked", "Destination IBAN is locked"]
 }
 
 ## 6. Regole di valutazione
 Il servizio decide in base a più parametri:
-- sopra i 10'000 EUR la transazione non è valida, come reason "Amount must not exceeds 10'000";
-- IBAN bloccati, sia per il mittente che per il destinatario "L'IBAN del X è bloccato", dove X è "mittente" o "destinatario" a seconda dei casi;
-- la valuta non è considerata.
-- se scattano più validazioni, vengono restituite tutte.
+- sopra i 10000 EUR la transazione non è valida (un importo uguale alla soglia è ammesso), come reasons "Amount must not exceed 10000 EUR". Il testo è fisso e non riporta la soglia configurata;
+- IBAN bloccati, sia per il mittente che per il destinatario "X IBAN is locked", dove X è "Source" o "Destination" a seconda dei casi;
+- se scattano più validazioni, vengono restituite tutte, nell'ordine: importo, mittente, destinatario;
+- la valuta supportata è solo `EUR`: una valuta diversa non viene valutata e dà l'errore `400 UNSUPPORTED_CURRENCY` (sezione 7).
 
 ## 7. Errori
 Ogni risposta diversa da `200` è un errore del contratto, non un esito della
@@ -183,7 +178,7 @@ oppure si passa a una nuova versione con l'importo come stringa.
 ## 11. Esempi di scenari
 Dati di prova: IBAN bloccato `IT60X0542811101000000000099`; IBAN ordinari
 `IT60X0542811101000000000001` e `IT60X0542811101000000000002`. In tutti i casi il
-`transferId` è valorizzato.
+`transferId` è valorizzato con un UUID valido tipo '3f2b8c1e-9a47-4d6b-b5e2-1c8a7d0f4e93'.
 
 **Dal lato del Fraud service**
 
@@ -192,8 +187,8 @@ Dati di prova: IBAN bloccato `IT60X0542811101000000000099`; IBAN ordinari
 | 1 | Caso felice | amount `1000.25`, EUR, IBAN ordinari | `200`, `ALLOWED` |
 | 2 | Importo uguale alla soglia | amount `10000.00` | `200`, `ALLOWED` |
 | 3 | Importo oltre la soglia | amount `10000.01` | `200`, `REJECTED`, `["Amount must not exceed 10000 EUR"]` |
-| 4 | Mittente bloccato | `sourceIban` bloccato | `200`, `REJECTED`, `["Source IBAN is blocked"]` |
-| 5 | Destinatario bloccato | `destinationIban` bloccato | `200`, `REJECTED`, `["Destination IBAN is blocked"]` |
+| 4 | Mittente bloccato | `sourceIban` bloccato | `200`, `REJECTED`, `["Source IBAN is locked"]` |
+| 5 | Destinatario bloccato | `destinationIban` bloccato | `200`, `REJECTED`, `["Destination IBAN is locked"]` |
 | 6 | Entrambi bloccati | entrambi bloccati | `200`, `REJECTED`, mittente poi destinatario |
 | 7 | Soglia e mittente bloccato | amount `20000.00`, mittente bloccato | `200`, `REJECTED`, importo poi mittente |
 | 8 | Importo zero | amount `0` | `400`, `INVALID_REQUEST` |
