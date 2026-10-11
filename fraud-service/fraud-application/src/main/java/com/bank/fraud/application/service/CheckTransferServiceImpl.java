@@ -11,7 +11,6 @@ import com.bank.fraud.domain.Iban;
 import com.bank.fraud.domain.Money;
 import com.bank.fraud.domain.TransferToAssess;
 import com.bank.fraud.domain.exception.InvalidFraudRequestException;
-import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashSet;
@@ -19,7 +18,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
-@Service
 public class CheckTransferServiceImpl implements CheckTransferInPort {
 
     private final BlockedIbanOutPort blockedIbanOutPort;
