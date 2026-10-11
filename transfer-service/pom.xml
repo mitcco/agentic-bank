@@ -29,13 +29,13 @@
 	</scm>
 
 	<modules>
-		<module>domain</module>
-		<module>application</module>
-		<module>adapter-web</module>
-		<module>adapter-persistence</module>
-		<module>adapter-notification</module>
-		<module>adapter-fraud</module>
-		<module>bootstrap</module>
+		<module>transfer-domain</module>
+		<module>transfer-application</module>
+		<module>transfer-web-adapter</module>
+		<module>transfer-persistence-adapter</module>
+		<module>transfer-notification-adapter</module>
+		<module>transfer-fraud-adapter</module>
+		<module>transfer-bootstrap</module>
 	</modules>
 
 	<properties>
@@ -47,32 +47,32 @@
 		<dependencies>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>domain</artifactId>
+				<artifactId>transfer-domain</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>application</artifactId>
+				<artifactId>transfer-application</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>adapter-web</artifactId>
+				<artifactId>transfer-web-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>adapter-persistence</artifactId>
+				<artifactId>transfer-persistence-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>adapter-notification</artifactId>
+				<artifactId>transfer-notification-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>adapter-fraud</artifactId>
+				<artifactId>transfer-fraud-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
