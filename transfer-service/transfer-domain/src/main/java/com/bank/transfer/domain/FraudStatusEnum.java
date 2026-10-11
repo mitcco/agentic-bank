@@ -1,6 +1,6 @@
 package com.bank.transfer.domain;
 
-public enum FraudDecisionEnum {
+public enum FraudStatusEnum {
   ALLOWED,
   REJECTED
 }
