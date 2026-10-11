@@ -1,6 +1,6 @@
 package com.bank.transfer.config;
 
-import com.bank.transfer.adapter.out.fraud.StubFraudCheck;
+import com.bank.transfer.port.out.fraud.impl.StubFraudCheck;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.domain.Iban;
 import java.math.BigDecimal;

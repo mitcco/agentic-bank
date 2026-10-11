@@ -7,32 +7,32 @@
 		<artifactId>transfer-service</artifactId>
 		<version>0.0.1-SNAPSHOT</version>
 	</parent>
-	<artifactId>bootstrap</artifactId>
+	<artifactId>transfer-bootstrap</artifactId>
 
 	<dependencies>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>domain</artifactId>
+			<artifactId>transfer-domain</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>application</artifactId>
+			<artifactId>transfer-application</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>adapter-web</artifactId>
+			<artifactId>transfer-web-adapter</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>adapter-persistence</artifactId>
+			<artifactId>transfer-persistence-adapter</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>adapter-fraud</artifactId>
+			<artifactId>transfer-fraud-adapter</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>com.bank</groupId>
-			<artifactId>adapter-notification</artifactId>
+			<artifactId>transfer-notification-adapter</artifactId>
 		</dependency>
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
