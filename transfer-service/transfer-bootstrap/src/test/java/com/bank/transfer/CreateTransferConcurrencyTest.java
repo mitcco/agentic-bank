@@ -4,8 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.bank.transfer.application.command.CreateTransferCommand;
 import com.bank.transfer.application.port.in.CreateTransferInPort;
+import com.bank.transfer.application.dto.FraudCheckResultDto;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
+import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.domain.Account;
+import com.bank.transfer.domain.FraudStatusEnum;
 import com.bank.transfer.domain.Iban;
 import com.bank.transfer.domain.Money;
 import com.bank.transfer.domain.exception.InsufficientFundException;
@@ -21,6 +24,9 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 
 /**
  * Real service, real JPA adapters and a real (in-memory H2) database: the pessimistic lock can only be proven here.
@@ -29,10 +35,21 @@ import org.springframework.boot.test.context.SpringBootTest;
 @SpringBootTest(properties = {
   "spring.datasource.url=jdbc:h2:mem:concurrency;DB_CLOSE_DELAY=-1",
   "spring.datasource.username=sa",
-  "spring.datasource.password=",
-  "fraud.stub.threshold=1000000"
+  "spring.datasource.password="
 })
 class CreateTransferConcurrencyTest {
+
+  /** The fraud check is not what is tested here: it always allows, from any thread, without any network. */
+  @TestConfiguration
+  static class AlwaysAllowedFraudCheck {
+
+    @Bean
+    @Primary
+    FraudCheckOutPort alwaysAllowedFraudCheck() {
+      return (transferId, sourceIban, destIban, amount, currency) ->
+        new FraudCheckResultDto(FraudStatusEnum.ALLOWED, List.of());
+    }
+  }
 
   private static final String IBAN_PREFIX = "IT60X0542811101000000";
 
