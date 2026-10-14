@@ -36,7 +36,7 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
 | `tools.jackson.core:jackson-databind` (Jackson 3, senza versione: la dà il BOM; come in `transfer-postgres-adapter`) | `notification-kafka-adapter` | compile |
 | `org.springframework.boot:spring-boot-starter-data-mongodb` | `notification-mongo-adapter` | compile |
 | `spring-boot-starter-test` (Mockito, AssertJ) | adapter e bootstrap | test |
-| `org.springframework.context:spring-context` (per `@Service`) | `notification-application` | compile, da chiedere all'inizio della fase 03 |
+| `org.springframework:spring-context` (per `@Service`) | `notification-application` | compile, da chiedere all'inizio della fase 03 |
 | Test di integrazione del consumer con broker embedded (EmbeddedKafka): l'artefatto (in Boot 4 probabilmente `org.springframework.boot:spring-boot-starter-kafka-test`) lo verifica il planner della fase 06 (JAR in `~/.m2`, nome esatto) e lo propone all'utente: **da approvare esplicitamente prima di aggiungerlo**. Se non è disponibile, ripiego: container del listener con `MockConsumer` costruito nel test (alternativa D), da chiedere | `notification-kafka-adapter` | test |
 
 Le versioni sono quelle gestite da `spring-boot-starter-parent` (stessa versione di Boot degli altri
