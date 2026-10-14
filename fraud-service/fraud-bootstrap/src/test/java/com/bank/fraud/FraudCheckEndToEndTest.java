@@ -3,7 +3,7 @@ package com.bank.fraud;
 import com.bank.fraud.application.port.in.CheckTransferInPort;
 import com.bank.fraud.application.port.out.BlockedIbanOutPort;
 import com.bank.fraud.application.service.CheckTransferServiceImpl;
-import com.bank.fraud.persistence.port.out.persistence.impl.inmemory.InMemoryBlockedIbanOutPortImpl;
+import com.bank.fraud.memory.port.out.memory.impl.InMemoryBlockedIbanOutPortImpl;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

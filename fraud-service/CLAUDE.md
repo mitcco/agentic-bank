@@ -19,15 +19,15 @@ richiesta e risposta, regole di valutazione, errori, esempi di scenari.
 |---|---|
 | `fraud-domain` | `Iban`, `Money`, `TransferToAssess`, `FraudAssessment`, `FraudPolicy` (la regola di business, funzione pura), enum, eccezioni. Solo JUnit e AssertJ come dipendenze |
 | `fraud-application` | `CheckTransferInPort`, `BlockedIbanOutPort`, service, DTO e command |
-| `fraud-web-adapter` | `POST /fraud-check`, DTO HTTP, mapper, gestione degli errori secondo la sezione 7 del contratto |
-| `fraud-persistence-adapter` | Implementa `BlockedIbanOutPort` con una lista in memoria letta dalla configurazione. Nessun database |
+| `fraud-rest-adapter` | `POST /fraud-check`, DTO HTTP, mapper, gestione degli errori secondo la sezione 7 del contratto |
+| `fraud-memory-adapter` | Implementa `BlockedIbanOutPort` con una lista in memoria letta dalla configurazione. Nessun database |
 | `fraud-bootstrap` | `FraudApplication`, configurazione dei bean, `application.properties`, test di integrazione |
 
 Le classi del dominio sono **proprie del Fraud service**: `Iban` e `Money`
 si riscrivono qui, non si importano dal Transfer.
 
 ## Struttura dei package degli adapter
-Segue il modello descritto in `transfer-service/CLAUDE.md` (adapter web e
+Segue il modello descritto in `transfer-service/CLAUDE.md` (adapter rest e
 adapter in uscita), con il prefisso `fraud-` nei moduli e `com.bank.fraud`
 nei package.
 

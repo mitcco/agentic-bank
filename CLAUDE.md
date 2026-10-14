@@ -27,13 +27,16 @@ una deviazione, chiedi prima.
 |---|---|
 | `<svc>-domain` | Java puro. Solo JUnit e AssertJ come dipendenze |
 | `<svc>-application` | Porte, service, command, DTO, mapper |
-| `<svc>-<tecnologia>-adapter` | Un modulo per ogni tecnologia o sistema collegato (web, persistence, messaging...) |
+| `<svc>-<tecnologia>-adapter` | Un modulo per ogni tecnologia o sistema collegato. `<tecnologia>` è il nome della tecnologia (`postgres`, `mongo`, `kafka`, `log`, `memory`...) o del sistema collegato (`fraud`), mai una categoria generica come `persistence` o `messaging` |
 | `<svc>-bootstrap` | Applicazione Spring Boot, configurazione dei bean, test di integrazione |
 
 - Il pom padre `<svc>-service/pom.xml` elenca i moduli; tutti gli `artifactId`
   iniziano con `<svc>-`.
 - La struttura dei package degli adapter è descritta in
   `transfer-service/CLAUDE.md` ed è il modello da replicare.
+- Un adapter contiene una sola tecnologia: se un modulo ne mescola due (per
+  esempio un database e un client HTTP verso un altro servizio), si separano in due
+  adapter.
 
 ## Architettura esagonale
 - `domain/`: Java puro. Vietato Spring, JPA, Jackson e qualsiasi framework.

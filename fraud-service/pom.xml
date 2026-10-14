@@ -31,8 +31,8 @@
 	<modules>
 		<module>fraud-domain</module>
 		<module>fraud-application</module>
-		<module>fraud-web-adapter</module>
-		<module>fraud-persistence-adapter</module>
+		<module>fraud-rest-adapter</module>
+		<module>fraud-memory-adapter</module>
 		<module>fraud-bootstrap</module>
 	</modules>
 
@@ -55,12 +55,12 @@
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>fraud-web-adapter</artifactId>
+				<artifactId>fraud-rest-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>fraud-persistence-adapter</artifactId>
+				<artifactId>fraud-memory-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
