@@ -25,8 +25,9 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
   Gli IBAN arrivano e vengono salvati in Mongo.
 - Test **senza Docker**, strategia **ibrida** per il consumer Kafka (decisione dell'utente): il comportamento (parsing,
   validazione, mappatura, scarto, tentativi) si prova con test unitari senza broker; i tentativi, l'ack dopo il
-  ritorno del listener e lo scarto a 3 tentativi si provano con **UN SOLO** test di integrazione con broker
-  embedded (EmbeddedKafka). Mongo: test unitari con repository finto (sempre eseguiti) più test
+  ritorno del listener e lo scarto a 3 tentativi si provano con **UN SOLO** test di integrazione contro il Kafka
+  del docker-compose, saltato in modo visibile se non raggiungibile (decisione dell'utente, fase 06; niente broker
+  embedded né dipendenze di test Kafka). Mongo: test unitari con repository finto (sempre eseguiti) più test
   `*IntegrationTest` contro il MongoDB di Docker, saltati in modo visibile se non raggiungibile (decisione
   dell'utente, fase 05); repository mockato nel bootstrap.
 - Nessun modulo rest, nessun endpoint, nessun Actuator.
@@ -38,7 +39,7 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
 | `tools.jackson.core:jackson-databind` (Jackson 3, senza versione: la dà il BOM; come in `transfer-postgres-adapter`) | `notification-kafka-adapter` | compile |
 | `org.springframework.boot:spring-boot-starter-data-mongodb` | `notification-mongo-adapter` | compile |
 | `spring-boot-starter-test` (Mockito, AssertJ) | adapter e bootstrap | test |
-| Test di integrazione del consumer con broker embedded (EmbeddedKafka): l'artefatto (in Boot 4 probabilmente `org.springframework.boot:spring-boot-starter-kafka-test`) lo verifica il planner della fase 06 (JAR in `~/.m2`, nome esatto) e lo propone all'utente: **da approvare esplicitamente prima di aggiungerlo**. Se non è disponibile, ripiego: container del listener con `MockConsumer` costruito nel test (alternativa D), da chiedere | `notification-kafka-adapter` | test |
+| ~~Broker embedded~~: **scartato nella fase 06** (JAR assenti in `~/.m2`, porterebbe Mockito); il test di integrazione del consumer usa il Kafka del compose (nessuna dipendenza). Per i test del kafka-adapter servono solo `junit-jupiter` e `assertj-core` (test, senza versione, approvate nella fase 06) | `notification-kafka-adapter` | test |
 
 Le versioni sono quelle gestite da `spring-boot-starter-parent` (stessa versione di Boot degli altri
 servizi). Il planner verifica il nome esatto degli artefatti per la versione di Boot in uso (Boot 4.x) e,
@@ -132,7 +133,8 @@ DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
   dell'offset solo dopo il successo del port (modalità `RECORD`, conferma dopo ritorno del listener).
 - Test (strategia ibrida): scenari 1-8 del contratto (sezione 9) con port finto e senza broker (unit test del
   listener/handler e del mapper); scenario 9 (port che lancia: 3 chiamate, poi il messaggio successivo viene
-  elaborato) e conferma dell'offset solo a successo con **UN SOLO** test di integrazione con broker embedded;
+  elaborato) e conferma dell'offset solo a successo con **UN SOLO** test di integrazione contro il Kafka del compose
+  (saltato in modo visibile se non risponde; piano di dettaglio: `notification-06-kafka-adapter.md`);
   scenario 10 sugli output catturati.
 - Il parsing del JSON usa **Jackson** (in Boot 4 è Jackson 3, package `tools.jackson`), nel solo adapter Kafka:
   il dominio e l'application non lo vedono. Il `JsonMapper` è configurato per ignorare i campi sconosciuti e

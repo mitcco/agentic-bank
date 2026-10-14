@@ -6,7 +6,7 @@ proprio `CLAUDE.md` nella sua cartella: leggilo prima di lavorare su quel serviz
 | Servizio | Stato |
 |---|---|
 | `transfer-service` | in sviluppo |
-| `fraud-service` | da fare |
+| `fraud-service` | completato (domain, application, rest, memory, bootstrap) |
 | `notification-service` | in sviluppo |
 | `frontend` (React) | da fare |
 

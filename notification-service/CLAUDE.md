@@ -47,8 +47,10 @@ e `com.bank.notification` nei package. In particolare:
 
 ## Comandi (dalla cartella `notification-service/`)
 - Test di tutto: `.\mvnw.cmd test`
-- **I test girano senza Docker**: il consumer Kafka si prova con test unitari senza broker, più
-  UN SOLO test di integrazione con broker embedded per tentativi e ack (strategia ibrida);
+- **I test unitari girano senza Docker**: il consumer Kafka si prova con test unitari senza broker, più
+  UN SOLO test di integrazione contro il Kafka del compose (`localhost:9092`, `KAFKA_BOOTSTRAP_SERVERS`;
+  topic e group con nome unico per esecuzione, `docker compose up -d kafka kafka-init` dalla radice) per
+  tentativi e ack, saltato in modo visibile se il broker non risponde (strategia ibrida);
   Mongo: nel mongo-adapter test unitari con repository finto, sempre eseguiti, più i test
   `*IntegrationTest` contro il MongoDB di Docker (database `notification_test`, URI da `MONGODB_URI`,
   `docker compose up -d mongo` dalla radice), saltati in modo visibile se Mongo non risponde;
