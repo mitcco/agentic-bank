@@ -36,7 +36,6 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
 | `tools.jackson.core:jackson-databind` (Jackson 3, senza versione: la dà il BOM; come in `transfer-postgres-adapter`) | `notification-kafka-adapter` | compile |
 | `org.springframework.boot:spring-boot-starter-data-mongodb` | `notification-mongo-adapter` | compile |
 | `spring-boot-starter-test` (Mockito, AssertJ) | adapter e bootstrap | test |
-| `org.springframework:spring-context` (per `@Service`) | `notification-application` | compile, da chiedere all'inizio della fase 03 |
 | Test di integrazione del consumer con broker embedded (EmbeddedKafka): l'artefatto (in Boot 4 probabilmente `org.springframework.boot:spring-boot-starter-kafka-test`) lo verifica il planner della fase 06 (JAR in `~/.m2`, nome esatto) e lo propone all'utente: **da approvare esplicitamente prima di aggiungerlo**. Se non è disponibile, ripiego: container del listener con `MockConsumer` costruito nel test (alternativa D), da chiedere | `notification-kafka-adapter` | test |
 
 Le versioni sono quelle gestite da `spring-boot-starter-parent` (stessa versione di Boot degli altri
@@ -81,7 +80,7 @@ Come `fraud-skeleton-maven.md`: pom padre `notification-service/pom.xml` (stessa
   Le porte in non espongono oggetti del dominio.
 - `NotificationStoreOutPort` (salva una notifica, idempotente per `transferId`) e `NotificationLogOutPort`
   (registra una notifica salvata). Le porte out ricevono oggetti del dominio.
-- `NotifyTransferServiceImpl` (`@Service`): crea il dominio dal command, `store.save`, poi `log.log`.
+- `NotifyTransferServiceImpl` (SENZA `@Service` né `@Transactional`, decisione dell'utente in `notification-03-application.md`: il bean lo dichiara `NotificationConfig` nel bootstrap, fase 07, come per `CheckTransferServiceImpl` del fraud-service; nessuna dipendenza nuova nell'application): crea il dominio dal command, `store.save`, poi `log.log`.
   Se `save` lancia una `RuntimeException` (l'adapter segnala così un errore del database), il service non
   la cattura né la avvolge: la eccezione risale così com'è, il log non viene chiamato. Serve ai tentativi
   del consumer. Una violazione delle regole del dominio (command non valido) lancia invece l'eccezione di
@@ -111,7 +110,13 @@ Come `fraud-skeleton-maven.md`: pom padre `notification-service/pom.xml` (stessa
 `${notification.topic}` nell'annotazione, mai il nome scritto nel codice né nei test), group `notification`,
 chiave e valore come stringhe; il valore è parsato in un DTO del messaggio con ignoranza dei campi sconosciuti; mapper
 DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
-- Validazione di formato (campo mancante, `status` sconosciuto, JSON illeggibile) → scarto immediato senza
+- **Vincoli per il mapper verso `NotifyTransferCommand`** (da `notification-03-application.md`): i campi assenti del JSON arrivano
+  `null` nel command, senza default inventati (li rifiuta il service/dominio con `InvalidNotificationException`, non ritentabile);
+  `status` si passa come stringa grezza SENZA `TransferOutcome.valueOf` (la conversione esatta e sensibile alle maiuscole è
+  nel service; un valore sconosciuto dà già `InvalidNotificationException`, non va duplicata nell'adapter); `reasons` null è
+  ammesso (il command lo trasforma in lista vuota); il mapper NON deve mai passare un command `null` (darebbe una
+  `NullPointerException`, ritentabile 3 volte per errore).
+- Validazione di formato (JSON illeggibile, campi di tipo sbagliato, data non ISO-8601) → scarto immediato senza
   tentativi, log di errore con il solo `transferId` se disponibile (**mai IBAN**).
 - Distinzione degli errori: l'eccezione di dominio (messaggio che viola le regole) e gli errori di parsing sono
   **non ritentabili** (scarto immediato); ogni altra `RuntimeException` dal port è **ritentabile**.
@@ -126,7 +131,7 @@ DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
   per leggere `amount` come `BigDecimal` (mai `double`).
 
 ### notification-07 — Bootstrap e integrazione
-`NotificationApplication`, `config/NotificationConfig` (bean di service e adapter), `application.properties`:
+`NotificationApplication`, `config/NotificationConfig` (bean di service e adapter: **qui va dichiarato `NotifyTransferServiceImpl` con `@Bean`**, perché il service non ha `@Service`; senza il bean il listener della fase 06 non ha una `NotifyTransferInPort`), `application.properties`:
 `spring.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}`, `spring.kafka.consumer.group-id=notification`,
 `spring.data.mongodb.uri=${MONGODB_URI:mongodb://localhost:27017/notification}`,
 `notification.topic=${NOTIFICATION_TOPIC:transfer.notifications}` (stessa variabile del Transfer).
