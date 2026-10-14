@@ -31,9 +31,9 @@
 	<modules>
 		<module>transfer-domain</module>
 		<module>transfer-application</module>
-		<module>transfer-web-adapter</module>
-		<module>transfer-persistence-adapter</module>
-		<module>transfer-notification-adapter</module>
+		<module>transfer-rest-adapter</module>
+		<module>transfer-postgres-adapter</module>
+		<module>transfer-kafka-adapter</module>
 		<module>transfer-fraud-adapter</module>
 		<module>transfer-bootstrap</module>
 	</modules>
@@ -57,17 +57,17 @@
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>transfer-web-adapter</artifactId>
+				<artifactId>transfer-rest-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>transfer-persistence-adapter</artifactId>
+				<artifactId>transfer-postgres-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>
 				<groupId>com.bank</groupId>
-				<artifactId>transfer-notification-adapter</artifactId>
+				<artifactId>transfer-kafka-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>

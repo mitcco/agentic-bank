@@ -27,6 +27,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * Real service, real JPA adapters and a real (in-memory H2) database: the pessimistic lock can only be proven here.
@@ -58,6 +59,9 @@ class CreateTransferConcurrencyTest {
 
   @Autowired
   private AccountRepositoryOutPort accountRepository;
+
+  @Autowired
+  private JdbcTemplate jdbcTemplate;
 
   private static String iban(String suffix) {
     return IBAN_PREFIX + suffix;
@@ -142,6 +146,23 @@ class CreateTransferConcurrencyTest {
     assertThat(successes(results)).isEqualTo(10);
     assertThat(balanceOf("P00003")).isEqualByComparingTo("0");
     assertThat(balanceOf("P00004")).isEqualByComparingTo("1000");
+  }
+
+  @Test
+  void eachSuccessfulParallelTransferWritesOneOutboxRowAndTheRefusedOnesWriteNone() throws Exception {
+    createAccount("P00007", "1000");
+    createAccount("P00008", "0");
+
+    List<Callable<Boolean>> tasks = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      tasks.add(transfer("P00007", "P00008", "100"));
+    }
+    List<Boolean> results = runTogether(tasks);
+
+    assertThat(successes(results)).isEqualTo(10);
+    Integer rows = jdbcTemplate.queryForObject("select count(*) from outbox where payload like ?", Integer.class,
+      "%\"sourceIban\":\"" + iban("P00007") + "\"%");
+    assertThat(rows).isEqualTo(10);
   }
 
   @Test

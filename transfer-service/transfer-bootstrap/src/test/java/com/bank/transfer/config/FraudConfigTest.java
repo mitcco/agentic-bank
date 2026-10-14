@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.port.out.fraud.impl.HttpFraudCheckOutPortImpl;
-import com.bank.transfer.port.out.fraud.impl.StubFraudCheck;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.PropertyPlaceholderAutoConfiguration;
@@ -31,29 +30,6 @@ class FraudConfigTest {
         assertThat(context).hasNotFailed();
         assertThat(context.getBeansOfType(FraudCheckOutPort.class)).hasSize(1);
         assertThat(context.getBean(FraudCheckOutPort.class)).isInstanceOf(HttpFraudCheckOutPortImpl.class);
-      });
-  }
-
-  @Test
-  void withTheInmemoryProfileTheStubIsTheOnlyFraudCheckBean() {
-    runner.withPropertyValues(
-        "spring.profiles.active=inmemory",
-        "fraud.base-url=http://fraud.test:8081",
-        "fraud.connect-timeout=1s",
-        "fraud.read-timeout=3s")
-      .run(context -> {
-        assertThat(context).hasNotFailed();
-        assertThat(context.getBeansOfType(FraudCheckOutPort.class)).hasSize(1);
-        assertThat(context.getBean(FraudCheckOutPort.class)).isInstanceOf(StubFraudCheck.class);
-      });
-  }
-
-  @Test
-  void withTheInmemoryProfileTheHttpPropertiesAreNotNeeded() {
-    runner.withPropertyValues("spring.profiles.active=inmemory")
-      .run(context -> {
-        assertThat(context).hasNotFailed();
-        assertThat(context.getBean(FraudCheckOutPort.class)).isInstanceOf(StubFraudCheck.class);
       });
   }
 

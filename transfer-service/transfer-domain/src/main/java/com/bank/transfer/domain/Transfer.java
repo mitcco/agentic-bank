@@ -14,6 +14,9 @@ public record Transfer(String id, Iban source, Iban dest, Money money, TransferS
     if (money.amount().signum() <= 0) {
       throw new IllegalArgumentException("Transfer amount has to be greater than 0");
     }
+    if (money.amount().stripTrailingZeros().scale() > 2) {
+      throw new IllegalArgumentException("Transfer amount can have at most 2 decimals");
+    }
     if (source.equals(dest)) {
       throw new IllegalArgumentException("Source and destination IBANs can not be the same");
     }

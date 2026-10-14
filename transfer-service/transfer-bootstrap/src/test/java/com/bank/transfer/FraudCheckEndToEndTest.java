@@ -16,6 +16,8 @@ import java.math.BigDecimal;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -115,6 +117,28 @@ class FraudCheckEndToEndTest {
   private MvcResult postTransfer() throws Exception {
     String body = "{\"sourceIban\":\"" + source + "\",\"destIban\":\"" + dest + "\","
       + "\"amount\":" + AMOUNT + ",\"currency\":\"EUR\"}";
+    return mockMvc.perform(post("/transfers").contentType(MediaType.APPLICATION_JSON).content(body)).andReturn();
+  }
+
+  private MvcResult postTransfer(String amount) throws Exception {
+    String body = "{\"sourceIban\":\"" + source + "\",\"destIban\":\"" + dest + "\","
+      + "\"amount\":" + amount + ",\"currency\":\"EUR\"}";
+    return mockMvc.perform(post("/transfers").contentType(MediaType.APPLICATION_JSON).content(body)).andReturn();
+  }
+
+  private List<String> outboxPayloadsFor(String transferId) {
+    return jdbcTemplate.queryForList("select payload from outbox where transfer_id = ?", String.class, transferId);
+  }
+
+  private int outboxRowsMentioning(String iban) {
+    Integer count = jdbcTemplate.queryForObject("select count(*) from outbox where payload like ?",
+      Integer.class, "%\"sourceIban\":\"" + iban + "\"%");
+    return count == null ? 0 : count;
+  }
+
+  private MvcResult postTransfer(String sourceIban, String destIban, String amount) throws Exception {
+    String body = "{\"sourceIban\":\"" + sourceIban + "\",\"destIban\":\"" + destIban + "\","
+      + "\"amount\":" + amount + ",\"currency\":\"EUR\"}";
     return mockMvc.perform(post("/transfers").contentType(MediaType.APPLICATION_JSON).content(body)).andReturn();
   }
 
@@ -227,6 +251,160 @@ class FraudCheckEndToEndTest {
       .andExpect(jsonPath("$.status").value(503))
       .andExpect(jsonPath("$.title").value("Service Unavailable"))
       .andExpect(jsonPath("$.detail").value(FIXED_DETAIL));
+  }
+
+  // ------------------------------------------------------------------ T24, T25
+
+  @Test
+  void t24_amountWithMoreThanTwoDecimalsAnswers400AndNothingIsAskedOrSaved() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+
+    MvcResult result = postTransfer("1.234");
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(400);
+    assertThat(result.getResponse().getContentType()).startsWith(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+    String body = result.getResponse().getContentAsString();
+    assertThat(body).contains("\"status\":400")
+      .contains("\"detail\":\"Transfer amount can have at most 2 decimals\"")
+      .doesNotContain("1.234").doesNotContain(source).doesNotContain(dest);
+    assertThat(FRAUD.requests()).isEmpty();
+    assertThat(transferRowsOf(source)).isZero();
+    assertThat(balanceOf(source)).isEqualByComparingTo("1000");
+    assertThat(balanceOf(dest)).isEqualByComparingTo("0");
+  }
+
+  @Test
+  void t25_amountWithTrailingZerosIsAcceptedAndCompleted() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+
+    MvcResult result = postTransfer("10.5000");
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(200);
+    assertThat(result.getResponse().getContentAsString()).contains("\"transferStatus\":\"COMPLETED\"");
+    assertThat(FRAUD.requests()).hasSize(1);
+    assertThat(balanceOf(source)).isEqualByComparingTo("989.50");
+    assertThat(balanceOf(dest)).isEqualByComparingTo("10.50");
+  }
+
+  // ------------------------------------------------------------------ T26 to T32: outbox rows (contract scenarios 11, 12)
+
+  @Test
+  void t26_completedTransferWritesExactlyOneOutboxRowWithTheContractPayload() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+    Instant before = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+
+    MvcResult result = postTransfer();
+
+    Instant after = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+    assertThat(result.getResponse().getStatus()).isEqualTo(200);
+    String response = result.getResponse().getContentAsString();
+    assertThat(response).contains("\"transferStatus\":\"COMPLETED\"");
+    String transferId = transferIdOf(response);
+
+    List<String> payloads = outboxPayloadsFor(transferId);
+    assertThat(payloads).hasSize(1);
+    String payload = payloads.get(0);
+    assertThat(payload).contains("\"transferId\":\"" + transferId + "\"")
+      .contains("\"sourceIban\":\"" + source + "\"")
+      .contains("\"destinationIban\":\"" + dest + "\"")
+      .contains("\"currency\":\"EUR\"")
+      .contains("\"status\":\"COMPLETED\"")
+      .containsPattern("\"amount\":123\\.45[,}]")
+      .doesNotContain("\"reasons\"")
+      .doesNotContain("\"destIban\"");
+
+    Matcher occurredAt = Pattern.compile("\"occurredAt\":\"(\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z)\"").matcher(payload);
+    assertThat(occurredAt.find()).as("occurredAt in the payload: %s", payload).isTrue();
+    Instant concluded = Instant.parse(occurredAt.group(1));
+    assertThat(concluded).isBetween(before, after);
+    assertThat(outboxRowsMentioning(source)).isEqualTo(1);
+  }
+
+  @Test
+  void t27_rejectedTransferWritesExactlyOneOutboxRowWithTheReasons() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, "{\"transferId\":\"" + transferIdOf(request)
+      + "\",\"status\":\"REJECTED\",\"reasons\":[\"Source IBAN is locked\",\"Destination IBAN is locked\"]}"));
+
+    MvcResult result = postTransfer();
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(200);
+    String response = result.getResponse().getContentAsString();
+    assertThat(response).contains("\"transferStatus\":\"REJECTED\"");
+    String transferId = transferIdOf(response);
+
+    List<String> payloads = outboxPayloadsFor(transferId);
+    assertThat(payloads).hasSize(1);
+    assertThat(payloads.get(0)).contains("\"status\":\"REJECTED\"")
+      .contains("\"reasons\":[\"Source IBAN is locked\",\"Destination IBAN is locked\"]")
+      .contains("\"sourceIban\":\"" + source + "\"")
+      .contains("\"destinationIban\":\"" + dest + "\"");
+    assertThat(outboxRowsMentioning(source)).isEqualTo(1);
+  }
+
+  /** Chosen: all the unavailability scenarios (t18 to t22), one extra second for t19 only. */
+  @ParameterizedTest(name = "{0}")
+  @MethodSource("unavailableScenarios")
+  void t28_whenTheFraudCheckIsUnavailableNoOutboxRowIsWritten(Scenario scenario) throws Exception {
+    scenario.setup().accept(FRAUD);
+
+    MvcResult result = postTransfer();
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(503);
+    assertThat(outboxRowsMentioning(source)).isZero();
+    assertThat(transferRowsOf(source)).isZero();
+  }
+
+  @Test
+  void t29_missingDestinationAccountAnswers404WritesNoOutboxRowAndNeverAsksTheFraudCheck() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+    String neverCreated = IBAN_PREFIX + String.format("N%05d", SEQUENCE.get());
+
+    MvcResult result = postTransfer(source, neverCreated, AMOUNT);
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(404);
+    assertThat(outboxRowsMentioning(source)).isZero();
+    assertThat(transferRowsOf(source)).isZero();
+    assertThat(FRAUD.requests()).isEmpty();
+  }
+
+  @Test
+  void t30_amountWithMoreThanTwoDecimalsAnswers400AndWritesNoOutboxRow() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+
+    MvcResult result = postTransfer("1.234");
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(400);
+    assertThat(outboxRowsMentioning(source)).isZero();
+  }
+
+  @Test
+  void t31_insufficientFundsAnswers422WritesNoOutboxRowAndSavesNothing() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, allowedFor(request)));
+
+    MvcResult result = postTransfer("2000");
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(422);
+    assertThat(outboxRowsMentioning(source)).isZero();
+    assertThat(transferRowsOf(source)).isZero();
+    assertThat(balanceOf(source)).isEqualByComparingTo("1000");
+    assertThat(balanceOf(dest)).isEqualByComparingTo("0");
+  }
+
+  @Test
+  void t32_rejectedTransferWithALowercaseCurrencyAnswers400AndNothingIsSavedNorNotified() throws Exception {
+    FRAUD.respondWith(request -> FakeFraud.json(200, "{\"transferId\":\"" + transferIdOf(request)
+      + "\",\"status\":\"REJECTED\",\"reasons\":[\"Source IBAN is locked\"]}"));
+    String body = "{\"sourceIban\":\"" + source + "\",\"destIban\":\"" + dest + "\","
+      + "\"amount\":" + AMOUNT + ",\"currency\":\"eur\"}";
+
+    MvcResult result = mockMvc.perform(post("/transfers").contentType(MediaType.APPLICATION_JSON).content(body))
+      .andReturn();
+
+    assertThat(result.getResponse().getStatus()).isEqualTo(400);
+    assertThat(result.getResponse().getContentAsString()).contains("currency must be three uppercase letters");
+    assertThat(FRAUD.requests()).hasSize(1);
+    assertThat(transferRowsOf(source)).isZero();
+    assertThat(outboxRowsMentioning(source)).isZero();
   }
 
   // ------------------------------------------------------------------ the fake Fraud service

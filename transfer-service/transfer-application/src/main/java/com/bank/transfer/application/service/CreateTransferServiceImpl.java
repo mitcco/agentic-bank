@@ -2,11 +2,13 @@ package com.bank.transfer.application.service;
 
 import com.bank.transfer.application.command.CreateTransferCommand;
 import com.bank.transfer.application.dto.FraudCheckResultDto;
+import com.bank.transfer.application.dto.TransferNotificationDto;
 import com.bank.transfer.application.dto.TransferResultDto;
 import com.bank.transfer.application.exception.AccountNotFoundException;
 import com.bank.transfer.application.port.in.CreateTransferInPort;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
+import com.bank.transfer.application.port.out.NotificationOutPort;
 import com.bank.transfer.application.port.out.TransferRepositoryOutPort;
 import com.bank.transfer.domain.Account;
 import com.bank.transfer.domain.FraudStatusEnum;
@@ -27,14 +29,16 @@ public class CreateTransferServiceImpl implements CreateTransferInPort {
   private final AccountRepositoryOutPort accountRepositoryOutPort;
   private final TransferRepositoryOutPort transferRepositoryOutPort;
   private final FraudCheckOutPort fraudCheckOutPort;
+  private final NotificationOutPort notificationOutPort;
   private final TransactionTemplate transactionTemplate;
 
   public CreateTransferServiceImpl(AccountRepositoryOutPort accountRepositoryOutPort,
     TransferRepositoryOutPort transferRepositoryOutPort, FraudCheckOutPort fraudCheckOutPort,
-    TransactionTemplate transactionTemplate) {
+    NotificationOutPort notificationOutPort, TransactionTemplate transactionTemplate) {
     this.accountRepositoryOutPort = accountRepositoryOutPort;
     this.transferRepositoryOutPort = transferRepositoryOutPort;
     this.fraudCheckOutPort = fraudCheckOutPort;
+    this.notificationOutPort = notificationOutPort;
     this.transactionTemplate = transactionTemplate;
   }
 
@@ -55,14 +59,21 @@ public class CreateTransferServiceImpl implements CreateTransferInPort {
     return transactionTemplate.execute(status -> {
       if (FraudStatusEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
         Transfer completed = completeTransfer(transfer);
+        notificationOutPort.publish(toNotification(completed, List.of()));
 
         return new TransferResultDto(completed.id(), completed.status().name(), fraudCheckResultDto.reasons());
       }
       Transfer rejected = transfer.reject();
       transferRepositoryOutPort.save(rejected);
+      notificationOutPort.publish(toNotification(rejected, fraudCheckResultDto.reasons()));
 
       return new TransferResultDto(rejected.id(), rejected.status().name(), fraudCheckResultDto.reasons());
     });
+  }
+
+  private static TransferNotificationDto toNotification(Transfer concluded, List<String> reasons) {
+    return new TransferNotificationDto(concluded.id(), concluded.source().value(), concluded.dest().value(),
+      concluded.money().amount(), concluded.money().currency(), concluded.status(), reasons);
   }
 
   //per evitare che l'antifrode dia rejected per l'amount eccedente anche su IBAN non esistenti

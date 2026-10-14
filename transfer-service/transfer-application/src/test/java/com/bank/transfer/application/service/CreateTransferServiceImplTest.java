@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -14,11 +15,13 @@ import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.bank.transfer.application.command.CreateTransferCommand;
 import com.bank.transfer.application.dto.FraudCheckResultDto;
+import com.bank.transfer.application.dto.TransferNotificationDto;
 import com.bank.transfer.application.dto.TransferResultDto;
 import com.bank.transfer.application.exception.AccountNotFoundException;
 import com.bank.transfer.application.exception.FraudCheckUnavailableException;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
+import com.bank.transfer.application.port.out.NotificationOutPort;
 import com.bank.transfer.application.port.out.TransferRepositoryOutPort;
 import com.bank.transfer.domain.Account;
 import com.bank.transfer.domain.FraudStatusEnum;
@@ -60,13 +63,16 @@ class CreateTransferServiceImplTest {
   private FraudCheckOutPort fraudCheck;
 
   @Mock
+  private NotificationOutPort notification;
+
+  @Mock
   private PlatformTransactionManager transactionManager;
 
   private CreateTransferServiceImpl service;
 
   @BeforeEach
   void setUp() {
-    service = new CreateTransferServiceImpl(accountRepository, transferRepository, fraudCheck,
+    service = new CreateTransferServiceImpl(accountRepository, transferRepository, fraudCheck, notification,
       new TransactionTemplate(transactionManager));
   }
 
@@ -277,5 +283,279 @@ class CreateTransferServiceImplTest {
     assertThat(exception.getMessage()).contains(ID).doesNotContain(SOURCE_IBAN).doesNotContain(DEST_IBAN);
     assertThat(exception.transferId()).isEqualTo(ID);
     assertThat(exception.getCause()).isNull();
+  }
+
+  @Test
+  void amountWithMoreThanTwoDecimalsIsRefusedBeforeTouchingAnything() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "1.234")))
+      .isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("Transfer amount can have at most 2 decimals");
+
+    verifyNoInteractions(accountRepository, fraudCheck, transferRepository, transactionManager);
+  }
+
+  @Test
+  void tinyAmountWithThreeDecimalsIsRefusedBeforeTouchingAnything() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "0.001")))
+      .isInstanceOf(IllegalArgumentException.class)
+      .hasMessage("Transfer amount can have at most 2 decimals");
+
+    verifyNoInteractions(accountRepository, fraudCheck, transferRepository, transactionManager);
+  }
+
+  @Test
+  void amountWithTrailingZerosIsAcceptedAndCompleted() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30.00"));
+
+    assertThat(result.transferStatus()).isEqualTo("COMPLETED");
+  }
+
+  // ------------------------------------------------------------------ notification (outbox) scenarios
+
+  private TransferNotificationDto publishedNotification() {
+    ArgumentCaptor<TransferNotificationDto> published = ArgumentCaptor.forClass(TransferNotificationDto.class);
+    verify(notification, times(1)).publish(published.capture());
+    return published.getValue();
+  }
+
+  private Transfer savedTransfer() {
+    ArgumentCaptor<Transfer> saved = ArgumentCaptor.forClass(Transfer.class);
+    verify(transferRepository).save(saved.capture());
+    return saved.getValue();
+  }
+
+  @Test
+  void completedTransferPublishesOneNotificationWithAllTheTransferData() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    TransferNotificationDto dto = publishedNotification();
+    assertThat(dto.transferId()).isEqualTo(savedTransfer().id()).isEqualTo(result.transferId());
+    assertThat(dto.sourceIban()).isEqualTo(SOURCE_IBAN);
+    assertThat(dto.destIban()).isEqualTo(DEST_IBAN);
+    assertThat(dto.amount()).isEqualByComparingTo("30");
+    assertThat(dto.currency()).isEqualTo("EUR");
+    assertThat(dto.status()).isEqualTo(TransferStatusEnum.COMPLETED);
+    assertThat(dto.reasons()).isEmpty();
+  }
+
+  @Test
+  void rejectedTransferPublishesOneNotificationWithTheReasonsInOrder() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.REJECTED, List.of("Amount must not exceed 10000 EUR", "Source IBAN is locked"));
+
+    service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    TransferNotificationDto dto = publishedNotification();
+    assertThat(dto.status()).isEqualTo(TransferStatusEnum.REJECTED);
+    assertThat(dto.reasons()).containsExactly("Amount must not exceed 10000 EUR", "Source IBAN is locked");
+    assertThat(dto.transferId()).isEqualTo(savedTransfer().id());
+    assertThat(dto.sourceIban()).isEqualTo(SOURCE_IBAN);
+    assertThat(dto.destIban()).isEqualTo(DEST_IBAN);
+    assertThat(dto.amount()).isEqualByComparingTo("30");
+    assertThat(dto.currency()).isEqualTo("EUR");
+  }
+
+  @Test
+  void completedNotificationIsPublishedAfterAllTheSaves() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    InOrder order = inOrder(fraudCheck, accountRepository, transferRepository, notification);
+    order.verify(fraudCheck).checkFraud(anyString(), anyString(), anyString(), any(BigDecimal.class), anyString());
+    order.verify(accountRepository).findByIbanForUpdate(SOURCE);
+    order.verify(accountRepository).findByIbanForUpdate(DEST);
+    order.verify(accountRepository, times(2)).save(any(Account.class));
+    order.verify(transferRepository).save(any(Transfer.class));
+    order.verify(notification).publish(any(TransferNotificationDto.class));
+  }
+
+  @Test
+  void rejectedNotificationIsPublishedAfterTheTransferIsSaved() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.REJECTED, List.of("Source IBAN is locked"));
+
+    service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    InOrder order = inOrder(transferRepository, notification);
+    order.verify(transferRepository).save(any(Transfer.class));
+    order.verify(notification).publish(any(TransferNotificationDto.class));
+  }
+
+  @Test
+  void notificationIsPublishedInsideTheTransactionBeforeTheCommit() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    InOrder order = inOrder(transactionManager, notification);
+    order.verify(transactionManager).getTransaction(any());
+    order.verify(notification).publish(any(TransferNotificationDto.class));
+    order.verify(transactionManager).commit(any());
+  }
+
+  @Test
+  void failingNotificationOnACompletedTransferIsPropagatedAndRollsBackWithoutCommit() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+    RuntimeException failure = new IllegalStateException("outbox write failed");
+    doThrow(failure).when(notification).publish(any(TransferNotificationDto.class));
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isSameAs(failure);
+
+    verify(transactionManager).rollback(any());
+    verify(transactionManager, never()).commit(any());
+  }
+
+  @Test
+  void failingNotificationOnARejectedTransferIsPropagatedAndRollsBackWithoutCommit() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.REJECTED, List.of("Source IBAN is locked"));
+    RuntimeException failure = new IllegalStateException("outbox write failed");
+    doThrow(failure).when(notification).publish(any(TransferNotificationDto.class));
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isSameAs(failure);
+
+    verify(transactionManager).rollback(any());
+    verify(transactionManager, never()).commit(any());
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenTheFraudCheckIsUnavailable() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    FraudCheckUnavailableException unavailable = new FraudCheckUnavailableException(ID);
+    lenient().when(fraudCheck.checkFraud(anyString(), anyString(), anyString(), any(BigDecimal.class), anyString()))
+      .thenThrow(unavailable);
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isSameAs(unavailable);
+
+    verifyNoInteractions(notification);
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenTheSourceAccountDoesNotExist() {
+    givenAccounts(account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isInstanceOf(AccountNotFoundException.class);
+
+    verifyNoInteractions(notification);
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenTheDestinationAccountDoesNotExist() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isInstanceOf(AccountNotFoundException.class);
+
+    verifyNoInteractions(notification);
+  }
+
+  @Test
+  void noNotificationIsPublishedForAnAmountWithMoreThanTwoDecimals() {
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "1.234")))
+      .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "0.001")))
+      .isInstanceOf(IllegalArgumentException.class);
+
+    verifyNoInteractions(notification);
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenSourceAndDestinationAreTheSameIban() {
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, "it60 x054 2811 1010 0000 0000 001", "30")))
+      .isInstanceOf(IllegalArgumentException.class);
+
+    verifyNoInteractions(notification);
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenTheFundsAreInsufficient() {
+    givenAccounts(account("acc-1", SOURCE, "10", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isInstanceOf(InsufficientFundException.class);
+
+    verify(notification, never()).publish(any(TransferNotificationDto.class));
+    verify(transactionManager).rollback(any());
+  }
+
+  @Test
+  void noNotificationIsPublishedWhenTheDestinationCurrencyIsDifferent() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "USD"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    assertThatThrownBy(() -> service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30")))
+      .isInstanceOf(DifferentCurrencyException.class);
+
+    verify(notification, never()).publish(any(TransferNotificationDto.class));
+  }
+
+  @Test
+  void allowedWithSpuriousReasonsStillCompletesAndTheNotificationHasNoReasons() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of("x"));
+
+    TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    assertThat(result.transferStatus()).isEqualTo("COMPLETED");
+    TransferNotificationDto dto = publishedNotification();
+    assertThat(dto.status()).isEqualTo(TransferStatusEnum.COMPLETED);
+    assertThat(dto.reasons()).isEmpty();
+    verify(transactionManager).commit(any());
+  }
+
+  @Test
+  void notificationCarriesTheNormalizedSourceIban() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    service.executeTransfer(command("it60 x054 2811 1010 0000 0000 001", DEST_IBAN, "30"));
+
+    assertThat(publishedNotification().sourceIban()).isEqualTo(SOURCE_IBAN);
+  }
+
+  @Test
+  void notificationKeepsTheAmountEqualToTheOneRequestedWhateverItsScale() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30.00"));
+
+    assertThat(publishedNotification().amount()).isEqualByComparingTo("30");
+  }
+
+  @Test
+  void notificationTransferIdIsTheOneSentToTheFraudCheckAndReturnedInTheResult() {
+    givenAccounts(account("acc-1", SOURCE, "100", "EUR"), account("acc-2", DEST, "50", "EUR"));
+    givenFraudDecision(FraudStatusEnum.ALLOWED, List.of());
+
+    TransferResultDto result = service.executeTransfer(command(SOURCE_IBAN, DEST_IBAN, "30"));
+
+    ArgumentCaptor<String> sentTransferId = ArgumentCaptor.forClass(String.class);
+    verify(fraudCheck).checkFraud(sentTransferId.capture(), anyString(), anyString(), any(BigDecimal.class), anyString());
+    TransferNotificationDto dto = publishedNotification();
+    assertThat(dto.transferId()).isEqualTo(sentTransferId.getValue()).isEqualTo(result.transferId());
   }
 }
