@@ -8,6 +8,8 @@ import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.core.env.Environment;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.util.ClassUtils;
 
 import javax.sql.DataSource;
@@ -45,17 +47,18 @@ class NotificationApplicationTests {
     assertThat(context.getBeanNamesForType(DataSource.class)).isEmpty();
   }
 
-  // I test sui bean "kafkaTemplate" e "mongoTemplate" (per nome, perche' le classi non sono sul
-  // classpath in questa fase) andranno rivisti con una modifica esplicita nelle fasi 05-07,
-  // quando i bean ci saranno davvero.
+  // Since phase 07 the Kafka and Mongo auto-configurations are active: the container factory
+  // "kafkaListenerContainerFactory" (declared by NotificationConfig) and the single "mongoTemplate"
+  // (from Spring Boot) are now expected in the context.
   @Test
-  void noKafkaTemplateBeanIsPresent() {
-    assertThat(context.containsBean("kafkaTemplate")).isFalse();
+  void kafkaListenerContainerFactoryBeanIsPresent() {
+    assertThat(context.getBean("kafkaListenerContainerFactory"))
+        .isInstanceOf(ConcurrentKafkaListenerContainerFactory.class);
   }
 
   @Test
-  void noMongoTemplateBeanIsPresent() {
-    assertThat(context.containsBean("mongoTemplate")).isFalse();
+  void mongoTemplateBeanIsPresent() {
+    assertThat(context.getBeanNamesForType(MongoTemplate.class)).containsExactly("mongoTemplate");
   }
 
   @Test

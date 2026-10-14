@@ -54,7 +54,23 @@ e `com.bank.notification` nei package. In particolare:
   Mongo: nel mongo-adapter test unitari con repository finto, sempre eseguiti, più i test
   `*IntegrationTest` contro il MongoDB di Docker (database `notification_test`, URI da `MONGODB_URI`,
   `docker compose up -d mongo` dalla radice), saltati in modo visibile se Mongo non risponde;
-  repository mockato nel bootstrap.
+  bootstrap: test di filiera senza Docker (repository finto scritto a mano, listener spento da
+  `src/test/resources/config/application.properties`) più UN test end-to-end contro Kafka e Mongo del
+  compose (topic e group `notification-it-<UUID>`, database `notification_test`), saltato in modo
+  visibile se uno dei due non risponde. Con tutto il compose attivo: 309 test, 0 saltati.
+- Avvio locale: `docker compose up -d kafka kafka-init mongo` dalla radice, poi da questa cartella
+  `.\mvnw.cmd install -DskipTests` e `.\mvnw.cmd -pl notification-bootstrap spring-boot:run`
+  (giro completo verificato a mano dall'utente il 2026-10-14: bonifico via API del Transfer con
+  `NOTIFICATION_PUBLISHER_ENABLED=true`, sia `COMPLETED` sia rifiutato, fino alla riga di log del Notification).
+  Nota: il Transfer rifiuta con "Account not found" i bonifici verso IBAN che non sono conti nel suo database
+  (anche l'IBAN bloccato `...0099` del Fraud va creato come conto per provare quel rifiuto).
+- Variabili d'ambiente (con default di sviluppo): `KAFKA_BOOTSTRAP_SERVERS` (`localhost:9092`),
+  `NOTIFICATION_TOPIC` (`transfer.notifications`), `MONGODB_URI` (porta 27018 del compose, database
+  `notification`), `NOTIFICATION_MONGO_PASSWORD` (`notification_dev`).
+- Le proprietà `spring.kafka.listener.*` NON si applicano: la container factory la costruisce l'adapter.
+  Per spegnere il listener si usa `notification.listener.auto-startup` (`true` nel main, `false` nei test).
+- In Boot 4 la proprietà dell'URI Mongo è `spring.mongodb.uri` (`spring.data.mongodb.uri` è deprecata).
+- Il documento Mongo contiene anche il campo `_class` di Spring Data (accettato).
 
 ## Dati di prova
 IBAN ordinari `IT60X0542811101000000000001` e `IT60X0542811101000000000002`; IBAN del

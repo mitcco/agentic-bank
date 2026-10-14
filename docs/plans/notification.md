@@ -143,15 +143,20 @@ DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
 ### notification-07 — Bootstrap e integrazione
 `NotificationApplication`, `config/NotificationConfig` (bean di service e adapter: **qui va dichiarato `NotifyTransferServiceImpl` con `@Bean`**, perché il service non ha `@Service`; senza il bean il listener della fase 06 non ha una `NotifyTransferInPort`), `application.properties`:
 `spring.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}`, `spring.kafka.consumer.group-id=notification`,
-`spring.data.mongodb.uri=${MONGODB_URI:mongodb://localhost:27017/notification}`,
-`notification.topic=${NOTIFICATION_TOPIC:transfer.notifications}` (stessa variabile del Transfer).
-- Test di integrazione nel bootstrap (con lo stesso broker embedded già usato dal test della fase 06 se possibile, oppure
-  senza broker con il listener disattivato) e repository Mongo mockato (`@MockitoBean`): un messaggio
-  `COMPLETED` e uno `REJECTED` pubblicati sul topic arrivano a `save` con i dati giusti e producono una
-  riga di log senza IBAN; messaggio duplicato → due `save` con lo stesso `_id`; messaggio non valido →
-  nessuna chiamata a `save`.
-- Il contesto parte senza Docker. Un solo bean per ogni porta.
-- Chiude la fase: `.\mvnw.cmd test` completo da `notification-service/` in BUILD SUCCESS senza Docker.
+`spring.mongodb.uri=${MONGODB_URI:mongodb://notification:${NOTIFICATION_MONGO_PASSWORD:notification_dev}@localhost:27018/notification?authSource=admin}`
+(in Boot 4 `spring.data.mongodb.uri` è deprecata), `notification.topic=${NOTIFICATION_TOPIC:transfer.notifications}`
+(stessa variabile del Transfer), `notification.listener.auto-startup` (le `spring.kafka.listener.*` non si applicano alla
+nostra container factory).
+- **Completata.** Piano di dettaglio: `notification-07-bootstrap.md`. Test del bootstrap: filiera senza Docker (repository finto
+  scritto a mano, listener spento, niente `@MockitoBean` né broker embedded) più UN end-to-end contro Kafka e Mongo del compose,
+  saltato in modo visibile se non rispondono: un messaggio `COMPLETED` e uno `REJECTED` arrivano a `save` con i dati giusti e
+  producono una riga di log senza IBAN; messaggio duplicato → due `save` con lo stesso `_id`; messaggio non valido → nessuna
+  chiamata a `save`.
+- Il contesto parte senza Docker (listener spento nei test). Un solo bean per ogni porta.
+- Esito: `.\mvnw.cmd test` completo da `notification-service/` in BUILD SUCCESS, 309 test con il compose attivo.
+  Senza Docker i test d'integrazione risultano saltati (non provato in questa fase). Giro completo verificato a mano
+  dall'utente il 2026-10-14 (bonifico via API del Transfer, con `NOTIFICATION_PUBLISHER_ENABLED=true`, `COMPLETED` e
+  rifiutato, fino al log del Notification).
 
 ## Criteri di accettazione generali
 - `.\mvnw.cmd test` da `notification-service/` verde, senza Docker, senza broker o database esterni.
@@ -193,8 +198,12 @@ I passi 2-8 sono stati eseguiti con la pipeline degli agenti (transfer-02 ... tr
 - At-least-once: righe di log duplicate in caso di riconsegna (accettato).
 - Con l'outbox del Transfer la notifica non si perde ma può arrivare più volte (gestito: idempotenza
   sul consumatore).
-- Il CLAUDE.md radice dice `notification-service | da fare`: l'aggiornamento della tabella è fuori perimetro
-  (lo fa l'utente a fine lavori).
+- Il CLAUDE.md radice: la riga `notification-service` è stata portata a "completato" a fine fase 07, su autorizzazione
+  esplicita dell'utente.
+- I test d'integrazione del mongo-adapter e del bootstrap usano la stessa collezione `transfer_notifications` di
+  `notification_test` (il primo svuota la collezione): non eseguirli in parallelo (`-T`) o moduli in parallelo.
+- Con Mongo irraggiungibile, `save` fallisce dopo `serverSelectionTimeout` (30 s) e i 3 tentativi durano circa 92 s,
+  sotto `max.poll.interval.ms`; accorciabile con `serverSelectionTimeoutMS` nell'URI (non fatto).
 
 ## Fuori perimetro
 Dead-letter, autenticazione Kafka, Actuator, endpoint di lettura delle notifiche, invio reale di
