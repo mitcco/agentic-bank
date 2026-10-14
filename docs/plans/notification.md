@@ -23,17 +23,21 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
 - Il service salva prima, poi scrive il log.
 - Nel log **mai gli IBAN**: si stampano `transferId`, importo, valuta, esito, motivi, `occurredAt`.
   Gli IBAN arrivano e vengono salvati in Mongo.
-- Test **senza Docker**: Kafka con `spring-kafka-test` (broker embedded), Mongo mockato.
+- Test **senza Docker**, strategia **ibrida** per il consumer Kafka (decisione dell'utente): il comportamento (parsing,
+  validazione, mappatura, scarto, tentativi) si prova con test unitari senza broker; i tentativi, l'ack dopo il
+  ritorno del listener e lo scarto a 3 tentativi si provano con **UN SOLO** test di integrazione con broker
+  embedded (EmbeddedKafka). Mongo mockato.
 - Nessun modulo rest, nessun endpoint, nessun Actuator.
 
 ## Dipendenze pre-approvate (le uniche ammesse; ogni altra va chiesta)
 | Dipendenza | Modulo | Scope |
 |---|---|---|
-| `org.springframework.kafka:spring-kafka` | `notification-kafka-adapter` | compile |
-| `org.springframework.kafka:spring-kafka-test` | `notification-kafka-adapter`, `notification-bootstrap` | test |
+| `org.springframework.boot:spring-boot-starter-kafka` (come in `transfer-kafka-adapter`; porta `spring-kafka` e `kafka-clients`) | `notification-kafka-adapter` | compile |
+| `tools.jackson.core:jackson-databind` (Jackson 3, senza versione: la dà il BOM; come in `transfer-postgres-adapter`) | `notification-kafka-adapter` | compile |
 | `org.springframework.boot:spring-boot-starter-data-mongodb` | `notification-mongo-adapter` | compile |
-| Jackson (`spring-boot-starter-json` o l'artefatto equivalente per Boot 4) | `notification-kafka-adapter` | compile |
 | `spring-boot-starter-test` (Mockito, AssertJ) | adapter e bootstrap | test |
+| `org.springframework.context:spring-context` (per `@Service`) | `notification-application` | compile, da chiedere all'inizio della fase 03 |
+| Test di integrazione del consumer con broker embedded (EmbeddedKafka): l'artefatto (in Boot 4 probabilmente `org.springframework.boot:spring-boot-starter-kafka-test`) lo verifica il planner della fase 06 (JAR in `~/.m2`, nome esatto) e lo propone all'utente: **da approvare esplicitamente prima di aggiungerlo**. Se non è disponibile, ripiego: container del listener con `MockConsumer` costruito nel test (alternativa D), da chiedere | `notification-kafka-adapter` | test |
 
 Le versioni sono quelle gestite da `spring-boot-starter-parent` (stessa versione di Boot degli altri
 servizi). Il planner verifica il nome esatto degli artefatti per la versione di Boot in uso (Boot 4.x) e,
@@ -54,7 +58,7 @@ Come `fraud-skeleton-maven.md`: pom padre `notification-service/pom.xml` (stessa
 `java.version=21`, modulo MapStruct solo se il piano lo giustifica), wrapper Maven copiato, `.gitignore`,
 `.gitattributes`, e 6 moduli: `notification-domain`, `notification-application`, `notification-kafka-adapter`,
 `notification-log-adapter`, `notification-mongo-adapter`, `notification-bootstrap`.
-- Dipendenze tra moduli: i quattro adapter dipendono solo da `application` (e dal proprio framework);
+- Dipendenze tra moduli: i tre adapter dipendono solo da `application` (e dal proprio framework);
   `bootstrap` dipende da tutti. Il domain ha solo JUnit e AssertJ.
 - `NotificationApplication` e `application.properties` (`spring.application.name=notification`,
   nessuna `server.port`). Nessun starter web.
@@ -113,8 +117,10 @@ DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
   **non ritentabili** (scarto immediato); ogni altra `RuntimeException` dal port è **ritentabile**.
 - Errore dal port (es. database) → 3 tentativi totali a 1 s, poi scarto con errore nel log. Conferma
   dell'offset solo dopo il successo del port (modalità `RECORD`, conferma dopo ritorno del listener).
-- Test con `spring-kafka-test`: scenari 1-8 del contratto (sezione 9) con port finto; scenario 9 con port che
-  lancia (3 chiamate, poi il messaggio successivo viene elaborato); scenario 10 sugli output catturati.
+- Test (strategia ibrida): scenari 1-8 del contratto (sezione 9) con port finto e senza broker (unit test del
+  listener/handler e del mapper); scenario 9 (port che lancia: 3 chiamate, poi il messaggio successivo viene
+  elaborato) e conferma dell'offset solo a successo con **UN SOLO** test di integrazione con broker embedded;
+  scenario 10 sugli output catturati.
 - Il parsing del JSON usa **Jackson** (in Boot 4 è Jackson 3, package `tools.jackson`), nel solo adapter Kafka:
   il dominio e l'application non lo vedono. Il `JsonMapper` è configurato per ignorare i campi sconosciuti e
   per leggere `amount` come `BigDecimal` (mai `double`).
@@ -124,7 +130,8 @@ DTO → `NotifyTransferCommand`; chiamata a `NotifyTransferInPort`.
 `spring.kafka.bootstrap-servers=${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}`, `spring.kafka.consumer.group-id=notification`,
 `spring.data.mongodb.uri=${MONGODB_URI:mongodb://localhost:27017/notification}`,
 `notification.topic=${NOTIFICATION_TOPIC:transfer.notifications}` (stessa variabile del Transfer).
-- Test di integrazione con `@EmbeddedKafka` e repository Mongo mockato (`@MockitoBean`): un messaggio
+- Test di integrazione nel bootstrap (con lo stesso broker embedded già usato dal test della fase 06 se possibile, oppure
+  senza broker con il listener disattivato) e repository Mongo mockato (`@MockitoBean`): un messaggio
   `COMPLETED` e uno `REJECTED` pubblicati sul topic arrivano a `save` con i dati giusti e producono una
   riga di log senza IBAN; messaggio duplicato → due `save` con lo stesso `_id`; messaggio non valido →
   nessuna chiamata a `save`.
@@ -163,7 +170,7 @@ I passi 2-8 sono stati eseguiti con la pipeline degli agenti (transfer-02 ... tr
    MongoDB su Docker.
 
 ## Rischi
-- Boot 4.x: nomi degli artefatti Kafka/Mongo e dei package di test (`@EmbeddedKafka`, `@MockitoBean`) da
+- Boot 4.x: nomi degli artefatti Kafka/Mongo e dei package di test (EmbeddedKafka, `@MockitoBean`) da
   verificare nella fase 01/06/07; scostamenti vanno segnalati, non aggirati.
 - Il contesto Spring può tentare di collegarsi a Kafka/Mongo all'avvio nei test: i test lo evitano con
   broker embedded e repository finto; se non basta, ambiguità al planner.
