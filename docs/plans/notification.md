@@ -26,7 +26,9 @@ Il notification-service lo consuma, scrive una riga di log (senza IBAN) e salva 
 - Test **senza Docker**, strategia **ibrida** per il consumer Kafka (decisione dell'utente): il comportamento (parsing,
   validazione, mappatura, scarto, tentativi) si prova con test unitari senza broker; i tentativi, l'ack dopo il
   ritorno del listener e lo scarto a 3 tentativi si provano con **UN SOLO** test di integrazione con broker
-  embedded (EmbeddedKafka). Mongo mockato.
+  embedded (EmbeddedKafka). Mongo: test unitari con repository finto (sempre eseguiti) più test
+  `*IntegrationTest` contro il MongoDB di Docker, saltati in modo visibile se non raggiungibile (decisione
+  dell'utente, fase 05); repository mockato nel bootstrap.
 - Nessun modulo rest, nessun endpoint, nessun Actuator.
 
 ## Dipendenze pre-approvate (le uniche ammesse; ogni altra va chiesta)
@@ -99,11 +101,17 @@ Come `fraud-skeleton-maven.md`: pom padre `notification-service/pom.xml` (stessa
 ### notification-05 — Mongo adapter
 `notification-mongo-adapter`: documento con `_id` = `transferId`, `sourceIban`, `destinationIban`, `amount`
 (`BigDecimal`/Decimal128), `currency`, `status`, `reasons`, `occurredAt`; repository Spring Data;
-`NotificationStoreOutPortImpl`; mapper dominio ↔ documento.
-- Test senza Docker: mapper (round-trip, `amount` senza perdita di scala, reasons assenti/presenti),
-  adapter con repository mockato (chiama `save` una volta con `_id` = `transferId`, un secondo `save` dello
+`NotificationStoreOutPortImpl`; mapper dominio → documento (solo `toDocument`: la porta ha solo `save`).
+Piano di dettaglio: `notification-05-mongo-adapter.md`.
+- Test unitari (sempre eseguiti): mapper (`amount` Decimal128 a 2 decimali, reasons assenti/presenti),
+  adapter con repository finto (chiama `save` una volta con `_id` = `transferId`, un secondo `save` dello
   stesso `transferId` non è un `insert`, eccezione del repository propagata).
-- Nessuna prova su un MongoDB vero: è dichiarata come prova manuale nel riepilogo di fase.
+- Test `*IntegrationTest` contro il MongoDB di Docker (database `notification_test`), saltati in modo visibile
+  se Mongo non è raggiungibile: tipi BSON reali, upsert idempotente.
+- Per la fase 07: la proprietà in Boot 4 è `spring.mongodb.uri` (`spring.data.mongodb.uri` è deprecata con
+  livello error); va tolta la riga `spring.autoconfigure.exclude` messa in fase 05 nel bootstrap e il test 6
+  di `NotificationApplicationTests` diventa `mongoTemplateBeanIsPresent` (modifica esplicita); il documento ha
+  il campo `_class` di Spring Data (accettato).
 
 ### notification-06 — Kafka adapter
 `notification-kafka-adapter`: listener sul topic letto dalla proprietà `notification.topic` (segnaposto

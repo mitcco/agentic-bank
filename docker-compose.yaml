@@ -39,5 +39,22 @@ services:
            --create --if-not-exists --topic ${NOTIFICATION_TOPIC:-transfer.notifications}
     restart: "no"
 
+  mongo:
+    image: mongo:8.0
+    container_name: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: notification
+      MONGO_INITDB_ROOT_PASSWORD: ${NOTIFICATION_MONGO_PASSWORD:-notification_dev}
+    ports:
+      - "27018:27017"
+    volumes:
+      - notification-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   transfer-db-data:
+  notification-mongo-data:

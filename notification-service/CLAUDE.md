@@ -49,8 +49,10 @@ e `com.bank.notification` nei package. In particolare:
 - Test di tutto: `.\mvnw.cmd test`
 - **I test girano senza Docker**: il consumer Kafka si prova con test unitari senza broker, più
   UN SOLO test di integrazione con broker embedded per tentativi e ack (strategia ibrida);
-  Mongo mockato nei test dell'adapter e del bootstrap. Un MongoDB vero serve solo per la prova
-  manuale (`docker compose up -d` dalla radice, quando il compose lo prevede).
+  Mongo: nel mongo-adapter test unitari con repository finto, sempre eseguiti, più i test
+  `*IntegrationTest` contro il MongoDB di Docker (database `notification_test`, URI da `MONGODB_URI`,
+  `docker compose up -d mongo` dalla radice), saltati in modo visibile se Mongo non risponde;
+  repository mockato nel bootstrap.
 
 ## Dati di prova
 IBAN ordinari `IT60X0542811101000000000001` e `IT60X0542811101000000000002`; IBAN del
