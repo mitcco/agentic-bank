@@ -28,6 +28,7 @@ import com.bank.transfer.application.exception.FraudCheckUnavailableException;
 import com.bank.transfer.application.port.in.CreateExternalTransferInPort;
 import com.bank.transfer.application.port.in.CreateTransferInPort;
 import com.bank.transfer.application.port.in.ProcessClearingOutcomesInPort;
+import com.bank.transfer.application.port.in.ReconcileExternalTransfersInPort;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.ClearingHouseOutPort;
 import com.bank.transfer.application.port.out.ExternalTransferRepositoryOutPort;
@@ -205,10 +206,15 @@ class ExternalTransferSagaServiceImplTest {
     assertThat(CreateTransferInPort.class.isAssignableFrom(ExternalTransferSagaServiceImpl.class)).isFalse();
   }
 
+  /**
+   * Guard on the shape of the Saga: exactly the three in ports of the external flow (creation, clearing outcomes,
+   * reconciliation); any other interface, including the routing and internal flow ports, makes it fail.
+   */
   @Test
-  void implementsOnlyTheTwoSagaInPorts() {
+  void implementsOnlyTheThreeSagaInPorts() {
     assertThat(ExternalTransferSagaServiceImpl.class.getInterfaces())
-      .containsExactlyInAnyOrder(CreateExternalTransferInPort.class, ProcessClearingOutcomesInPort.class);
+      .containsExactlyInAnyOrder(CreateExternalTransferInPort.class, ProcessClearingOutcomesInPort.class,
+        ReconcileExternalTransfersInPort.class);
   }
 
   // ------------------------------------------------------------------ steps 1-4: validation, antifraud

@@ -8,6 +8,8 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "external_transfer")
@@ -35,6 +37,9 @@ public class ExternalTransferEntity {
   @Column(length = 500)
   private String reason;
 
+  @Column(name = "created_at", nullable = false, updatable = false)
+  private LocalDateTime createdAt;
+
   protected ExternalTransferEntity() {
   }
 
@@ -47,6 +52,7 @@ public class ExternalTransferEntity {
     this.currency = currency;
     this.status = status;
     this.reason = reason;
+    this.createdAt = LocalDateTime.now(ZoneOffset.UTC);
   }
 
   public String getId() {
@@ -75,5 +81,9 @@ public class ExternalTransferEntity {
 
   public String getReason() {
     return reason;
+  }
+
+  public LocalDateTime getCreatedAt() {
+    return createdAt;
   }
 }

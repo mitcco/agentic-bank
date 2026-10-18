@@ -11,6 +11,7 @@ import com.bank.transfer.application.exception.AccountNotFoundException;
 import com.bank.transfer.application.exception.ClearingHouseUnavailableException;
 import com.bank.transfer.application.port.in.CreateExternalTransferInPort;
 import com.bank.transfer.application.port.in.ProcessClearingOutcomesInPort;
+import com.bank.transfer.application.port.in.ReconcileExternalTransfersInPort;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.ClearingHouseOutPort;
 import com.bank.transfer.application.port.out.ExternalTransferRepositoryOutPort;
@@ -22,7 +23,9 @@ import com.bank.transfer.domain.Iban;
 import com.bank.transfer.domain.Money;
 import com.bank.transfer.domain.Transfer;
 import com.bank.transfer.domain.TransferStatusEnum;
+import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,15 +36,20 @@ import org.springframework.transaction.support.TransactionTemplate;
  * Saga of the external transfers: debit and SENT in one transaction, then the clearing house outside of any
  * transaction. The debit is compensated only when the instruction was certainly not received
  * ({@link ClearingHouseUnavailableException}); any other failure of the submission leaves the transfer UNKNOWN,
- * with the funds still debited, until a late outcome arrives.
+ * with the funds still debited. It stays UNKNOWN until a late outcome arrives (the poll of
+ * {@link ProcessClearingOutcomesInPort}) or until the reconciliation ({@code reconcileStale} of
+ * {@link ReconcileExternalTransfersInPort}) asks the clearing house about it.
+ * Implements three in ports: create, process the outcomes, reconcile the stale transfers.
  * Logs carry only the transfer id, the status and the simple name of an exception.
  */
 @Service
-public class ExternalTransferSagaServiceImpl implements CreateExternalTransferInPort, ProcessClearingOutcomesInPort {
+public class ExternalTransferSagaServiceImpl
+  implements CreateExternalTransferInPort, ProcessClearingOutcomesInPort, ReconcileExternalTransfersInPort {
 
   private static final Logger LOG = LoggerFactory.getLogger(ExternalTransferSagaServiceImpl.class);
 
   private static final String CLEARING_UNAVAILABLE_REASON = "Clearing house unavailable";
+  private static final String INSTRUCTION_NOT_FOUND_REASON = "Instruction not found at the clearing house";
   private static final String SOURCE_NOT_FOUND = "Source Account not found";
 
   private final AccountRepositoryOutPort accountRepositoryOutPort;
@@ -143,6 +151,30 @@ public class ExternalTransferSagaServiceImpl implements CreateExternalTransferIn
         }
       } catch (RuntimeException e) {
         LOG.warn("Outcome failed for transfer {}: {}", outcome.transferId(), e.getClass().getSimpleName());
+      }
+    }
+    return applied;
+  }
+
+  @Override
+  public int reconcileStale(Instant createdBefore, int maxTransfers) {
+    Objects.requireNonNull(createdBefore, "createdBefore");
+    if (maxTransfers < 1) {
+      throw new IllegalArgumentException("maxTransfers must be at least 1");
+    }
+    List<String> ids = externalTransferRepositoryOutPort.findInProgressIdsCreatedBefore(createdBefore, maxTransfers);
+    int applied = 0;
+    for (String id : ids) {
+      try {
+        ClearingOutcomeDto outcome = clearingHouseOutPort.queryStatus(id).orElseGet(() -> {
+          LOG.info("Transfer {} not found at the clearing house", id);
+          return new ClearingOutcomeDto(id, ClearingDecisionEnum.REJECTED, INSTRUCTION_NOT_FOUND_REASON);
+        });
+        if (applyOutcome(outcome)) {
+          applied++;
+        }
+      } catch (RuntimeException e) {
+        LOG.warn("Reconciliation failed for transfer {}: {}", id, e.getClass().getSimpleName());
       }
     }
     return applied;

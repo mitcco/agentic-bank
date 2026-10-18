@@ -9,18 +9,23 @@ import com.bank.transfer.application.port.out.ClearingHouseOutPort;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Simulated clearing house. The outcome never comes from {@link #submit}: it is queued and returned by the next
  * {@link #pollOutcomes()}. In the TIMEOUT modes the instruction is received (its outcome is queued) but the caller
  * gets a timeout, so the result of the submission is uncertain.
+ * The outcomes are kept in memory and stay available to queryStatus even after the poll; a restart erases them
+ * (intended: a query without an answer means "instruction never received").
  */
 public class SimulatedClearingHouseOutPortImpl implements ClearingHouseOutPort {
 
   public static final String REJECT_REASON = "Rejected by the clearing house";
 
   private final ConcurrentLinkedQueue<ClearingOutcomeDto> outcomes = new ConcurrentLinkedQueue<>();
+  private final ConcurrentHashMap<String, ClearingOutcomeDto> received = new ConcurrentHashMap<>();
   private volatile SimulatedClearingModeEnum mode;
 
   public SimulatedClearingHouseOutPortImpl(SimulatedClearingModeEnum initialMode) {
@@ -40,15 +45,15 @@ public class SimulatedClearingHouseOutPortImpl implements ClearingHouseOutPort {
     Objects.requireNonNull(instruction, "instruction");
     String id = instruction.transferId();
     switch (mode) {
-      case ACCEPT -> outcomes.add(accepted(id));
-      case REJECT -> outcomes.add(rejected(id));
+      case ACCEPT -> enqueue(accepted(id));
+      case REJECT -> enqueue(rejected(id));
       case UNAVAILABLE -> throw new ClearingHouseUnavailableException(id);
       case TIMEOUT_THEN_ACCEPT -> {
-        outcomes.add(accepted(id));
+        enqueue(accepted(id));
         throw new ClearingHouseTimeoutException(id);
       }
       case TIMEOUT_THEN_REJECT -> {
-        outcomes.add(rejected(id));
+        enqueue(rejected(id));
         throw new ClearingHouseTimeoutException(id);
       }
     }
@@ -62,6 +67,17 @@ public class SimulatedClearingHouseOutPortImpl implements ClearingHouseOutPort {
       ready.add(outcome);
     }
     return List.copyOf(ready);
+  }
+
+  @Override
+  public Optional<ClearingOutcomeDto> queryStatus(String transferId) {
+    Objects.requireNonNull(transferId, "transferId");
+    return Optional.ofNullable(received.get(transferId));
+  }
+
+  private void enqueue(ClearingOutcomeDto outcome) {
+    received.put(outcome.transferId(), outcome);
+    outcomes.add(outcome);
   }
 
   private static ClearingOutcomeDto accepted(String transferId) {

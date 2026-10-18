@@ -3,6 +3,7 @@ package com.bank.transfer.application.port.out;
 import com.bank.transfer.application.dto.ClearingInstructionDto;
 import com.bank.transfer.application.dto.ClearingOutcomeDto;
 import java.util.List;
+import java.util.Optional;
 
 public interface ClearingHouseOutPort {
 
@@ -21,4 +22,10 @@ public interface ClearingHouseOutPort {
    * Returns the outcomes that are ready and consumes them: they are not returned again.
    */
   List<ClearingOutcomeDto> pollOutcomes();
+
+  /**
+   * Asks the clearing house for the outcome of an instruction. An empty result means that the clearing house
+   * confirms it never received the instruction (an authoritative answer), so compensating is safe.
+   */
+  Optional<ClearingOutcomeDto> queryStatus(String transferId);
 }
