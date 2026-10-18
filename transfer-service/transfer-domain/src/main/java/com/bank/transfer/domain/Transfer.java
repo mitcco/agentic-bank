@@ -27,18 +27,45 @@ public record Transfer(String id, Iban source, Iban dest, Money money, TransferS
   }
 
   public Transfer complete() {
-    requirePending();
+    requireStatus(TransferStatusEnum.PENDING);
     return new Transfer(id, source, dest, money, TransferStatusEnum.COMPLETED);
   }
 
   public Transfer reject() {
-    requirePending();
+    requireStatus(TransferStatusEnum.PENDING);
     return new Transfer(id, source, dest, money, TransferStatusEnum.REJECTED);
   }
 
-  private void requirePending() {
-    if (status != TransferStatusEnum.PENDING) {
-      throw new IllegalStateException("Transfer is already " + status);
+  public Transfer markSent() {
+    requireStatus(TransferStatusEnum.PENDING);
+    return new Transfer(id, source, dest, money, TransferStatusEnum.SENT);
+  }
+
+  public Transfer markUnknown() {
+    requireStatus(TransferStatusEnum.SENT);
+    return new Transfer(id, source, dest, money, TransferStatusEnum.UNKNOWN);
+  }
+
+  public Transfer settle() {
+    requireStatusIn(TransferStatusEnum.SENT, TransferStatusEnum.UNKNOWN);
+    return new Transfer(id, source, dest, money, TransferStatusEnum.COMPLETED);
+  }
+
+  public Transfer rejectAfterSent() {
+    requireStatusIn(TransferStatusEnum.SENT, TransferStatusEnum.UNKNOWN);
+    return new Transfer(id, source, dest, money, TransferStatusEnum.REJECTED);
+  }
+
+  private void requireStatus(TransferStatusEnum expected) {
+    requireStatusIn(expected);
+  }
+
+  private void requireStatusIn(TransferStatusEnum... allowed) {
+    for (TransferStatusEnum candidate : allowed) {
+      if (status == candidate) {
+        return;
+      }
     }
+    throw new IllegalStateException("Transfer is already " + status);
   }
 }

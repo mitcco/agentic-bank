@@ -19,4 +19,8 @@ public record Iban(String value) {
     }
     value = normalized;
   }
+
+  public BankCode bankCode() {
+    return new BankCode(value.substring(5, 10));
+  }
 }

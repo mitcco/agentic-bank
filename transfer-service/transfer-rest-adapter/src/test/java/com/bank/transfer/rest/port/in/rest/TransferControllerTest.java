@@ -125,4 +125,48 @@ class TransferControllerTest {
         .andExpect(status().isUnprocessableContent())
         .andExpect(jsonPath("$.detail").value("Different currency"));
   }
+
+  @Test
+  void returns202WhenTheTransferIsSent() throws Exception {
+    TransferServiceDto service = request -> new TransferResponseDto("t-1", "SENT", List.of());
+
+    postTransfer(service)
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.transferId").value("t-1"))
+        .andExpect(jsonPath("$.transferStatus").value("SENT"))
+        .andExpect(jsonPath("$.reasons").isArray())
+        .andExpect(jsonPath("$.reasons").isEmpty());
+  }
+
+  @Test
+  void returns202WhenTheOutcomeIsUnknown() throws Exception {
+    TransferServiceDto service = request -> new TransferResponseDto("t-1", "UNKNOWN", List.of());
+
+    postTransfer(service)
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.transferId").value("t-1"))
+        .andExpect(jsonPath("$.transferStatus").value("UNKNOWN"))
+        .andExpect(jsonPath("$.reasons").isEmpty());
+  }
+
+  @Test
+  void returns200ForARejectionAfterTheCompensation() throws Exception {
+    TransferServiceDto service = request -> new TransferResponseDto("t-1", "REJECTED",
+        List.of("Clearing house unavailable"));
+
+    postTransfer(service)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.transferStatus").value("REJECTED"))
+        .andExpect(jsonPath("$.reasons[0]").value("Clearing house unavailable"))
+        .andExpect(jsonPath("$.reasons.length()").value(1));
+  }
+
+  @Test
+  void onlyTheExactStatusNamesAnswer202() throws Exception {
+    TransferServiceDto service = request -> new TransferResponseDto("t-1", "sent", List.of());
+
+    postTransfer(service)
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.transferStatus").value("sent"));
+  }
 }

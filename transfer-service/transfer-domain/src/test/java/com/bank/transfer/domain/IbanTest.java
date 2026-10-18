@@ -45,4 +45,29 @@ class IbanTest {
     assertThatThrownBy(() -> new Iban("IT60-0542811101000000123456"))
         .isInstanceOf(IllegalArgumentException.class);
   }
+
+  @Test
+  void bankCodeIsTheAbiAtPositionsSixToTen() {
+    assertThat(new Iban(VALID).bankCode()).isEqualTo(new BankCode("05428"));
+  }
+
+  @Test
+  void bankCodeIsReadAfterNormalization() {
+    Iban iban = new Iban(" it60 x054 2811 1010 0000 0123 456 ");
+
+    assertThat(iban.bankCode()).isEqualTo(new BankCode("05428"));
+  }
+
+  @Test
+  void bankCodeOfAnotherBank() {
+    BankCode other = new Iban("IT60X0306909606100000012345").bankCode();
+
+    assertThat(other).isEqualTo(new BankCode("03069"));
+    assertThat(other).isNotEqualTo(new BankCode("05428"));
+  }
+
+  @Test
+  void blockedDemoIbanBelongsToOurBank() {
+    assertThat(new Iban("IT60X0542811101000000000099").bankCode()).isEqualTo(new BankCode("05428"));
+  }
 }

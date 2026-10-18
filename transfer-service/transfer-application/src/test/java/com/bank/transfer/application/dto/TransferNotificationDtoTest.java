@@ -92,6 +92,12 @@ class TransferNotificationDtoTest {
       .isInstanceOf(IllegalArgumentException.class);
   }
 
+  @Test
+  void sentStatusIsRefused() {
+    assertThatThrownBy(() -> notification(TransferStatusEnum.SENT, List.of()))
+      .isInstanceOf(IllegalArgumentException.class);
+  }
+
   // 7a-7f
   @Test
   void nullTransferIdIsRefused() {
@@ -266,5 +272,13 @@ class TransferNotificationDtoTest {
       TRANSFER_ID, SOURCE_IBAN, DEST_IBAN, new BigDecimal("1.234"), "ABCD", TransferStatusEnum.COMPLETED, List.of());
     assertThat(dto.amount()).isEqualByComparingTo("1.234");
     assertThat(dto.currency()).isEqualTo("ABCD");
+  }
+
+  @Test
+  void unknownStatusIsRefused() {
+    assertThatThrownBy(() -> notification(TransferStatusEnum.UNKNOWN, List.of()))
+      .isInstanceOf(IllegalArgumentException.class);
+    assertThatThrownBy(() -> notification(TransferStatusEnum.UNKNOWN, List.of(LOCKED)))
+      .isInstanceOf(IllegalArgumentException.class);
   }
 }
