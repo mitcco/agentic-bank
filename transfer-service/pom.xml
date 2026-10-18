@@ -35,6 +35,7 @@
 		<module>transfer-postgres-adapter</module>
 		<module>transfer-kafka-adapter</module>
 		<module>transfer-fraud-adapter</module>
+		<module>transfer-clearing-adapter</module>
 		<module>transfer-bootstrap</module>
 	</modules>
 
@@ -73,6 +74,11 @@
 			<dependency>
 				<groupId>com.bank</groupId>
 				<artifactId>transfer-fraud-adapter</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>com.bank</groupId>
+				<artifactId>transfer-clearing-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>

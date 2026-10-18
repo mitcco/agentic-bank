@@ -35,6 +35,10 @@
 			<artifactId>transfer-kafka-adapter</artifactId>
 		</dependency>
 		<dependency>
+			<groupId>com.bank</groupId>
+			<artifactId>transfer-clearing-adapter</artifactId>
+		</dependency>
+		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-actuator</artifactId>
 		</dependency>

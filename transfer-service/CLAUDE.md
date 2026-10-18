@@ -24,7 +24,8 @@ Conti e bonifici. Package base: `com.bank.transfer`.
 | `transfer-postgres-adapter` | JPA, repository Spring Data, entità, seed demo, migrazioni Flyway (`resources/db`) |
 | `transfer-fraud-adapter` | Client HTTP verso il Fraud (`HttpFraudCheckOutPortImpl` implementa `FraudCheckOutPort`, `FraudRestClientFactory`, DTO HTTP) |
 | `transfer-kafka-adapter` | Producer Kafka del publisher dell'outbox (`KafkaNotificationSenderOutPortImpl` implementa `NotificationSenderOutPort`) |
-| `transfer-bootstrap` | `TransferApplication`, `config/FraudConfig`, `config/ClockConfig`, `config/NotificationPublisher*`, `config/TransferRoutingConfig`, `config/Clearing*`, stanza di compensazione simulata (package `clearing.port.out.clearing.impl`, vedi sotto), `application.properties`, test di integrazione |
+| `transfer-clearing-adapter` | Stanza di compensazione simulata in memoria (`SimulatedClearingHouseOutPortImpl` implementa `ClearingHouseOutPort`, Java puro) |
+| `transfer-bootstrap` | `TransferApplication`, `config/FraudConfig`, `config/ClockConfig`, `config/NotificationPublisher*`, `config/TransferRoutingConfig`, `config/Clearing*`, `application.properties`, test di integrazione |
 
 ## Publisher dell'outbox
 Il publisher delle notifiche è spento di default: si accende con la variabile
@@ -58,11 +59,9 @@ l'avvio).
   router. Il flusso interno implementa `CreateInternalTransferInPort`.
 
 ### Stanza di compensazione simulata
-La stanza e finta e sta nel `transfer-bootstrap` (package
-`com.bank.transfer.clearing.port.out.clearing.impl`): **e una deviazione
-dalla struttura standard** (un modulo per sistema collegato), accettata perche
-non esiste una stanza reale; con una stanza vera si sposterebbe in un modulo
-`transfer-clearing-adapter`.
+La stanza e finta e vive nel modulo `transfer-clearing-adapter` (package
+`com.bank.transfer.clearing.port.out.clearing.impl`); il bean (`ClearingConfig`),
+i WARN, gli scheduler e le proprieta `clearing.*` restano nel `transfer-bootstrap`.
 - `CLEARING_SIMULATOR_MODE`: `ACCEPT` (default), `REJECT`, `UNAVAILABLE`,
   `TIMEOUT_THEN_ACCEPT`, `TIMEOUT_THEN_REJECT`. Un valore sconosciuto fa fallire
   l'avvio. L'esito non arriva mai dal `submit`, solo dal poll successivo.
@@ -98,6 +97,7 @@ del nome del modulo.
   `postgres.repository.model` (entità).
 - Fraud: `port.out.fraud.impl`.
 - Kafka: `kafka.port.out.kafka.impl`, `kafka.config` (listener degli errori).
+- Clearing: `clearing.port.out.clearing.impl`.
 
 ## Flusso di una richiesta (rest)
 Controller → `*ServiceDto` (adapter rest) → port.in → service → port.out →
