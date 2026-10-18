@@ -126,4 +126,159 @@ class TransferTest {
     assertThatThrownBy(completed::complete).isInstanceOf(IllegalStateException.class);
     assertThatThrownBy(completed::reject).isInstanceOf(IllegalStateException.class);
   }
+
+  private static Transfer transferIn(TransferStatusEnum status) {
+    return new Transfer("t-1", SOURCE, DEST, EUR("10.50"), status);
+  }
+
+  @Test
+  void markSentMovesAPendingTransferToSentKeepingIdAndMoney() {
+    Transfer pending = Transfer.create(SOURCE, DEST, EUR("100.25"));
+
+    Transfer sent = pending.markSent();
+
+    assertThat(sent.status()).isEqualTo(TransferStatusEnum.SENT);
+    assertThat(sent.id()).isEqualTo(pending.id());
+    assertThat(sent.source()).isEqualTo(pending.source());
+    assertThat(sent.dest()).isEqualTo(pending.dest());
+    assertThat(sent.money()).isEqualTo(pending.money());
+    assertThat(pending.status()).isEqualTo(TransferStatusEnum.PENDING);
+  }
+
+  @Test
+  void settleMovesASentTransferToCompleted() {
+    Transfer sent = transferIn(TransferStatusEnum.SENT);
+
+    Transfer completed = sent.settle();
+
+    assertThat(completed.status()).isEqualTo(TransferStatusEnum.COMPLETED);
+    assertThat(completed.id()).isEqualTo(sent.id());
+    assertThat(completed.money()).isEqualTo(sent.money());
+    assertThat(sent.status()).isEqualTo(TransferStatusEnum.SENT);
+  }
+
+  @Test
+  void rejectAfterSentMovesASentTransferToRejected() {
+    Transfer sent = transferIn(TransferStatusEnum.SENT);
+
+    Transfer rejected = sent.rejectAfterSent();
+
+    assertThat(rejected.status()).isEqualTo(TransferStatusEnum.REJECTED);
+    assertThat(rejected.id()).isEqualTo(sent.id());
+    assertThat(rejected.money()).isEqualTo(sent.money());
+    assertThat(sent.status()).isEqualTo(TransferStatusEnum.SENT);
+  }
+
+  @Test
+  void pendingTransferCannotBeSettledOrRejectedAfterSent() {
+    Transfer pending = transferIn(TransferStatusEnum.PENDING);
+
+    assertThatThrownBy(pending::settle).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(pending::rejectAfterSent).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void sentTransferCannotBeSentAgainNorCompletedNorRejectedAsPending() {
+    Transfer sent = transferIn(TransferStatusEnum.SENT);
+
+    assertThatThrownBy(sent::markSent).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(sent::complete).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(sent::reject).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void completedTransferCannotBeSentSettledOrRejectedAfterSent() {
+    Transfer completed = transferIn(TransferStatusEnum.COMPLETED);
+
+    assertThatThrownBy(completed::markSent).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(completed::settle).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(completed::rejectAfterSent).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void rejectedTransferCannotBeSentSettledOrRejectedAfterSent() {
+    Transfer rejected = transferIn(TransferStatusEnum.REJECTED);
+
+    assertThatThrownBy(rejected::markSent).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(rejected::settle).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(rejected::rejectAfterSent).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void invalidTransitionMessageNamesTheCurrentStatus() {
+    Transfer sent = transferIn(TransferStatusEnum.SENT);
+
+    assertThatThrownBy(sent::markSent)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessage("Transfer is already SENT");
+  }
+
+  @Test
+  void markUnknownMovesASentTransferToUnknownKeepingIdAndMoney() {
+    Transfer sent = Transfer.create(SOURCE, DEST, EUR("100.25")).markSent();
+
+    Transfer unknown = sent.markUnknown();
+
+    assertThat(unknown.status()).isEqualTo(TransferStatusEnum.UNKNOWN);
+    assertThat(unknown.id()).isEqualTo(sent.id());
+    assertThat(unknown.source()).isEqualTo(sent.source());
+    assertThat(unknown.dest()).isEqualTo(sent.dest());
+    assertThat(unknown.money()).isEqualTo(sent.money());
+    assertThat(sent.status()).isEqualTo(TransferStatusEnum.SENT);
+  }
+
+  @Test
+  void settleCompletesAnUnknownTransfer() {
+    Transfer unknown = transferIn(TransferStatusEnum.UNKNOWN);
+
+    Transfer completed = unknown.settle();
+
+    assertThat(completed.status()).isEqualTo(TransferStatusEnum.COMPLETED);
+    assertThat(completed.id()).isEqualTo(unknown.id());
+    assertThat(completed.money()).isEqualTo(unknown.money());
+    assertThat(unknown.status()).isEqualTo(TransferStatusEnum.UNKNOWN);
+  }
+
+  @Test
+  void rejectAfterSentRejectsAnUnknownTransfer() {
+    Transfer unknown = transferIn(TransferStatusEnum.UNKNOWN);
+
+    Transfer rejected = unknown.rejectAfterSent();
+
+    assertThat(rejected.status()).isEqualTo(TransferStatusEnum.REJECTED);
+    assertThat(rejected.id()).isEqualTo(unknown.id());
+    assertThat(rejected.money()).isEqualTo(unknown.money());
+    assertThat(unknown.status()).isEqualTo(TransferStatusEnum.UNKNOWN);
+  }
+
+  @Test
+  void onlyASentTransferCanBecomeUnknown() {
+    for (TransferStatusEnum status : new TransferStatusEnum[] {
+      TransferStatusEnum.PENDING, TransferStatusEnum.UNKNOWN, TransferStatusEnum.COMPLETED,
+      TransferStatusEnum.REJECTED}) {
+      Transfer transfer = transferIn(status);
+
+      assertThatThrownBy(transfer::markUnknown)
+        .as("markUnknown from " + status)
+        .isInstanceOf(IllegalStateException.class);
+    }
+  }
+
+  @Test
+  void unknownTransferCannotBeSentNorCompletedNorRejectedAsPending() {
+    Transfer unknown = transferIn(TransferStatusEnum.UNKNOWN);
+
+    assertThatThrownBy(unknown::markSent).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(unknown::complete).isInstanceOf(IllegalStateException.class);
+    assertThatThrownBy(unknown::reject).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void invalidMarkUnknownMessageNamesTheCurrentStatus() {
+    Transfer completed = transferIn(TransferStatusEnum.COMPLETED);
+
+    assertThatThrownBy(completed::markUnknown)
+      .isInstanceOf(IllegalStateException.class)
+      .hasMessage("Transfer is already COMPLETED");
+  }
 }

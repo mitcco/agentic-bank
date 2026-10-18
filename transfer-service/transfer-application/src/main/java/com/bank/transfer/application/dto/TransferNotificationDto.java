@@ -34,7 +34,7 @@ public record TransferNotificationDto(
         throw new IllegalArgumentException("reasons must not contain blank entries");
       }
     }
-    if (status == TransferStatusEnum.PENDING) {
+    if (status != TransferStatusEnum.COMPLETED && status != TransferStatusEnum.REJECTED) {
       throw new IllegalArgumentException("status must be COMPLETED or REJECTED");
     }
     if (status == TransferStatusEnum.REJECTED && reasons.isEmpty()) {

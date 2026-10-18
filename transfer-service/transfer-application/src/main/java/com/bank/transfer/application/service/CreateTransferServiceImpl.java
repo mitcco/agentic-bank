@@ -5,7 +5,7 @@ import com.bank.transfer.application.dto.FraudCheckResultDto;
 import com.bank.transfer.application.dto.TransferNotificationDto;
 import com.bank.transfer.application.dto.TransferResultDto;
 import com.bank.transfer.application.exception.AccountNotFoundException;
-import com.bank.transfer.application.port.in.CreateTransferInPort;
+import com.bank.transfer.application.port.in.CreateInternalTransferInPort;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
 import com.bank.transfer.application.port.out.NotificationOutPort;
@@ -24,7 +24,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 @Service
-public class CreateTransferServiceImpl implements CreateTransferInPort {
+public class CreateTransferServiceImpl implements CreateInternalTransferInPort {
 
   private final AccountRepositoryOutPort accountRepositoryOutPort;
   private final TransferRepositoryOutPort transferRepositoryOutPort;
