@@ -11,9 +11,15 @@ Conti e bonifici. Package base: `com.bank.transfer`.
 - I test di `transfer-postgres-adapter` girano su H2 in memoria (con Flyway):
   non richiedono Docker. In `transfer-bootstrap` `CreateTransferConcurrencyTest`,
   `FraudCheckEndToEndTest`, `ExternalTransferSagaIntegrationTest` e
-  `ExternalTransferEndToEndTest` usano H2 in memoria; solo
+  `ExternalTransferEndToEndTest`, `ExternalTransferReconciliationIntegrationTest`
+  e `DemoDataReconciliationIntegrationTest` usano H2 in memoria; solo
   `TransferApplicationTests` richiede il database Postgres attivo e senza
-  fallisce con "Connection to localhost:5433 refused".
+  fallisce con "Connection to localhost:5433 refused". Con il Postgres attivo quel
+  test avvia l'applicazione e **il seed dei dati demo si applica al database di
+  sviluppo** (vedi "Dati demo").
+- Un solo modulo: `.\mvnw.cmd -pl transfer-clearing-adapter -am test`. Senza `-am`
+  Maven usa i jar installati in `~/.m2`, che possono essere vecchi (basta un
+  `.\mvnw.cmd install -DskipTests` per allinearli).
 
 ## Moduli
 | Modulo | Contenuto |
@@ -54,6 +60,13 @@ l'avvio).
   riaccredito, nessuna notifica, i fondi restano addebitati. Un esito tardivo lo
   chiude: `processOutcomes()` lo applica a `SENT` e `UNKNOWN` (lock del bonifico,
   poi del conto; idempotente).
+- **Riconciliazione attiva** (`ReconcileExternalTransfersInPort.reconcileStale`):
+  per i bonifici `SENT` o `UNKNOWN` creati da piu di `clearing.reconcile.stale-after`
+  (5 minuti, misurati da `created_at`, in UTC) il service chiede alla stanza lo
+  stato (`ClearingHouseOutPort.queryStatus`) e applica l'esito con le stesse regole.
+  Se la stanza risponde "mai ricevuta" (vuoto) il rimborso e sicuro: `REJECTED`
+  "Instruction not found at the clearing house". Giro ogni 30 secondi, massimo
+  `clearing.reconcile.batch-size` (50) bonifici.
 - L'outbox riceve solo `COMPLETED` e `REJECTED`.
 - La Saga non implementa `CreateTransferInPort`: l'unico bean di quel tipo e il
   router. Il flusso interno implementa `CreateInternalTransferInPort`.
@@ -65,9 +78,12 @@ i WARN, gli scheduler e le proprieta `clearing.*` restano nel `transfer-bootstra
 - `CLEARING_SIMULATOR_MODE`: `ACCEPT` (default), `REJECT`, `UNAVAILABLE`,
   `TIMEOUT_THEN_ACCEPT`, `TIMEOUT_THEN_REJECT`. Un valore sconosciuto fa fallire
   l'avvio. L'esito non arriva mai dal `submit`, solo dal poll successivo.
+- Il simulatore ricorda gli esiti in memoria (anche dopo il poll) per rispondere a
+  `queryStatus`; un riavvio li cancella e ogni bonifico fermo risulta "mai ricevuto".
 - `CLEARING_OUTCOMES_ENABLED` (default `false`): con `false` non c'e nessuno
-  scheduler e i bonifici esterni restano `SENT` (WARN all'avvio) finche non si
-  chiama `processOutcomes()`; con `true` lo scheduler gira ogni 2 secondi.
+  scheduler e i bonifici esterni restano `SENT` o `UNKNOWN` (WARN all'avvio); con
+  `true` girano due scheduler: gli esiti (`processOutcomes()`, ogni 2 secondi) e la
+  riconciliazione (ogni 30 secondi, proprieta `clearing.reconcile.*`).
 
 ### Limiti e rischi
 - **Un conto interno con ABI diverso da `05428` e trattato come esterno**: il
@@ -77,14 +93,50 @@ i WARN, gli scheduler e le proprieta `clearing.*` restano nel `transfer-bootstra
   i contesti del bootstrap: falliscono `RoutingDefaultPropertiesTest`,
   `ExternalTransferSagaIntegrationTest` (wiring) e gli end-to-end dei flussi
   interni. Eliminarla prima di lanciare i test.
-- **`UNKNOWN` senza esito tardivo**: i fondi restano addebitati. Non ci sono
-  interrogazione attiva della stanza, job di riconciliazione ne scadenze.
-- **Esito consumato e poi fallito**, oppure crash tra il commit di `SENT` e il
-  `submit`: il bonifico resta `SENT` con l'addebito, senza recupero.
+- **Race tra il commit di `SENT` e il `submit`**: se la riconciliazione interroga
+  prima che l'istruzione sia arrivata alla stanza, la risposta e "non trovata", il
+  bonifico viene rimborsato e la stanza potrebbe poi accettare (doppio movimento).
+  `clearing.reconcile.stale-after` non va mai impostato vicino a zero (lo scheduler
+  rifiuta `0s` e i valori negativi).
+- **Una stanza reale deve rispondere "non trovata" in modo autorevole**: nel
+  simulatore dopo un riavvio la risposta e vuota per tutto, e i bonifici fermi
+  vengono rimborsati.
+- **Scheduler spenti** (default): `SENT` e `UNKNOWN` restano fermi e i fondi
+  addebitati finche non si accende `CLEARING_OUTCOMES_ENABLED`.
+- **Esito applicato e poi fallito** (errore del database durante `applyOutcome`):
+  il bonifico resta `SENT` o `UNKNOWN` e lo riprende la riconciliazione.
 - Dopo una compensazione immediata la risposta e sempre `REJECTED` "Clearing house
   unavailable", anche nel caso teorico di un esito concorrente gia applicato.
 - Niente prenotazione dei fondi ne registro dei movimenti; nessun `GET` dei
   bonifici. Scopo didattico.
+
+## Dati demo
+`DemoDataSeeder` (nel `transfer-postgres-adapter`) carica a ogni avvio dati
+dimostrativi **deterministici**, solo se mancano:
+- 3 conti storici (`ac1..ac3`, IBAN `...0001..0003`) e 50 conti `demo-acc-101..150`
+  (IBAN `IT60X0542811101` + 12 cifre, da `...0101` a `...0150`, ABI `05428`);
+- 43 bonifici interni (`tr1..tr3` e `demo-tr-001..040`) nella tabella `transfer` e
+  10 esterni (`demo-ext-001..010`) in `external_transfer`: 4 `COMPLETED`, 4
+  `REJECTED` (stanza, indisponibile, antifrode), 1 `SENT` e 1 `UNKNOWN`.
+- **Saldi coerenti con lo storico**: 2000.00 EUR meno gli addebiti piu gli
+  accrediti dei bonifici che muovono denaro (interni `COMPLETED`; esterni
+  `COMPLETED`, `SENT`, `UNKNOWN`); i rifiuti non muovono denaro (importi oltre la
+  soglia antifrode di 10000). Nessun saldo negativo, per costruzione.
+- **Idempotente e transazionale**: inserisce solo le righe mancanti (conti per IBAN,
+  bonifici per id) in una sola transazione; le righe esistenti non si modificano mai
+  (su un database gia popolato la coerenza dei saldi non vale: restano i valori che
+  c'erano). Non scrive mai nell'outbox.
+- **I due esterni `SENT` e `UNKNOWN` seminati**, con gli scheduler accesi, dopo
+  `stale-after` risultano "mai ricevuti": diventano `REJECTED` con rimborso (i conti
+  `...0149` e `...0150` tornano a 2000.00) e scrivono due righe nell'outbox.
+- Proprieta `transfer.demo-data.enabled` (`TRANSFER_DEMO_DATA_ENABLED`, default
+  `true`): con `false` il bean non viene creato e non si carica nulla; non cancella
+  dati gia presenti. Si spegne anche con `-Dtransfer.demo-data.enabled=false` o nella
+  Run Configuration di IntelliJ.
+- **Rischi**: `TRANSFER_DEMO_DATA_ENABLED=false` impostata sulla macchina fa fallire
+  `DemoDataSeederTest` e `DemoDataDefaultPropertiesTest`. Gli IBAN `...0101..0150` e
+  gli id `demo-*` sono riservati al seed: i test nuovi non devono usarli. Ogni
+  contesto `@SpringBootTest` semina circa 106 righe in piu (H2, trascurabile).
 
 ## Struttura dei package degli adapter (modello per gli altri servizi)
 Il package è `com.bank.<svc>.<tecnologia>`, con `<tecnologia>` uguale a quella
