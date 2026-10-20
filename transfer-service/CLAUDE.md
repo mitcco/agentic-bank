@@ -107,8 +107,83 @@ i WARN, gli scheduler e le proprieta `clearing.*` restano nel `transfer-bootstra
   il bonifico resta `SENT` o `UNKNOWN` e lo riprende la riconciliazione.
 - Dopo una compensazione immediata la risposta e sempre `REJECTED` "Clearing house
   unavailable", anche nel caso teorico di un esito concorrente gia applicato.
-- Niente prenotazione dei fondi ne registro dei movimenti; nessun `GET` dei
-  bonifici. Scopo didattico.
+- Niente prenotazione dei fondi ne registro dei movimenti. Scopo didattico.
+
+## Lettura di un bonifico
+`GET /transfers/{id}` (`TransferQueryController`, adapter rest) restituisce lo
+stato di un bonifico interno o esterno. Porta in `GetTransferInPort`
+(`GetTransferServiceImpl`), porta out di sola lettura `TransferQueryOutPort`
+(`JpaTransferQueryOutPortImpl`: cerca prima in `transfer`, poi in
+`external_transfer`, senza lock).
+- **Risposta 200** per qualsiasi stato salvato, anche `SENT` e `UNKNOWN` (il 202
+  resta del solo `POST`): `transferId`, `sourceIbanMasked`, `destIbanMasked`,
+  `amount` (2 decimali), `currency`, `transferStatus`, `reasons`.
+- **IBAN mascherati** da `Iban.masked()`: primi 4 e ultimi 4 caratteri, il resto
+  asterischi (27 caratteri). L'IBAN intero non esce mai: ne dalla risposta, ne dai
+  log, ne dagli errori, ne dai `toString()` dei DTO.
+- **Errori:** 404 "Transfer not found" per un id inesistente (qualunque stringa
+  e un id valido: gli id demo non sono UUID); 400 per un id vuoto; **500
+  "Stored transfer data is not valid"** se la riga letta ha un importo con piu
+  di 2 decimali o un IBAN non valido (`StoredTransferDataException`). I corpi
+  degli errori hanno `instance` fisso `/transfers`: l'id richiesto non compare.
+- **Motivi:** per gli esterni `reason` e spezzato su `"; "` (come i motivi
+  dell'antifrode nel `POST`); per gli interni `REJECTED` la lista e **sempre
+  vuota**, perche la tabella `transfer` non salva il motivo.
+- **Nessun controllo di accesso ne autenticazione**: chiunque conosca o indovini
+  un id legge stato, importo, valuta e IBAN mascherati. I bonifici nuovi hanno
+  UUID casuali (non enumerabili), gli id demo (`tr1`, `demo-tr-001`,
+  `demo-ext-001`) sono prevedibili. Il mascheramento riduce l'esposizione ma non e
+  crittografia ne controllo di accesso; la protezione vera (autenticazione,
+  proprieta del conto, TLS) arrivera con il frontend. `GET /accounts/{iban}`
+  resta aperto allo stesso modo.
+- Altri limiti: nessun rate limiting; la lettura non e bloccante, quindi subito
+  dopo un 202 puo restituire `SENT` mentre un esito e in corso di applicazione.
+
+## Elenco dei bonifici di un IBAN
+`GET /transfers?iban=...` (`TransferListController`, porta in `ListTransfersInPort`,
+`ListTransfersServiceImpl`; porta out di sola lettura `TransferListQueryOutPort`,
+`JpaTransferListQueryOutPortImpl`) elenca, paginati, i bonifici interni ed esterni in
+cui l'IBAN e mittente o destinatario.
+- **Parametri** (tutti facoltativi tranne `iban`; valori case-sensitive):
+  `iban` (27 caratteri, normalizzato); `direction`: `ALL` (default), `OUTGOING` (l'IBAN
+  e il mittente), `INCOMING` (l'IBAN e il destinatario); `status` (ripetibile, valori di
+  `TransferStatusEnum`; `PENDING` e ammesso ma non da mai risultati); `type`: `INTERNAL`
+  o `EXTERNAL`; `from` e `to` (istanti ISO-8601, `from` incluso e `to` escluso); `page`
+  (default 0) e `size` (default 20, massimo 100); finestra massima `(page + 1) * size <= 1000`.
+- **Risposta 200:** `items`, `page`, `size`, `totalElements`, `hasNext`. Ogni elemento:
+  `transferId`, `type`, `direction` (relativa all'IBAN chiesto), `counterpartyIbanMasked`,
+  `amount`, `currency`, `transferStatus`, `createdAt` (UTC). Niente motivi (si leggono con
+  `GET /transfers/{id}`) e niente IBAN chiesto. Ordine: dal piu recente, a parita di data
+  per id decrescente.
+- **Errori:** 400 con messaggi fissi che non ripetono il valore ricevuto (`instance` fisso
+  `/transfers`); un IBAN senza bonifici da 200 con lista vuota; **500 "Stored transfer
+  data is not valid"** se una riga della pagina ha un importo con piu di 2 decimali o un
+  IBAN non valido: e errata tutta la pagina che la contiene.
+- **Come legge le due tabelle:** una query ordinata per `transfer` e una per
+  `external_transfer` (le prime `offset + size` righe), fusione in memoria nell'adapter,
+  `totalElements` = somma dei due conteggi.
+- **Data e fuso:** `created_at` dei bonifici interni lo scrive il default del database nel
+  fuso della sessione (la JVM) ed e letto in sola lettura come ora locale; quello degli
+  esterni lo scrive l'applicazione in UTC. Ordine e filtri per data sono corretti solo se la
+  JVM e la sessione JDBC hanno sempre girato nello stesso fuso; al cambio dell'ora legale
+  un'ora e ambigua.
+- **Rischi e limiti:**
+  - **Nessun controllo di accesso:** chiunque conosca un IBAN (che non e un segreto)
+    ricostruisce lo storico del conto (controparti mascherate, importi, stati, date). Limiti
+    adottati: `size` massimo 100, finestra massima 1000, controparte sempre mascherata,
+    nessun IBAN o importo nei log e negli errori.
+  - **L'IBAN sta nella query string:** finisce negli access log di proxy, gateway e Tomcat
+    (se attivati) e nella cronologia del browser; per questo non e nel path.
+  - **Nessun indice** su `source_iban`, `dest_iban`, `created_at`, e i conteggi girano senza
+    `LIMIT`: la finestra di 1000 limita le righe lette, non il costo del conteggio. Un indice
+    sarebbe una migration V4 da proporre a parte.
+  - **Ordine a parita di data:** ogni tabella ordina per `id` con la collation del database,
+    la fusione con `String.compareTo`: su Postgres con una collation non-C i due ordini
+    possono non coincidere, e il confine di una pagina puo saltare o ripetere una riga (su
+    Postgres `now()` e l'inizio della transazione: tutte le righe interne del seed hanno lo
+    stesso `created_at`). I test girano su H2 e non lo coprono.
+  - Le due query non sono nella stessa transazione: un bonifico scritto in mezzo puo
+    spostare la paginazione di una riga.
 
 ## Dati demo
 `DemoDataSeeder` (nel `transfer-postgres-adapter`) carica a ogni avvio dati

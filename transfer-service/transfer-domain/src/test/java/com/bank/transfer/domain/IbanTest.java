@@ -70,4 +70,41 @@ class IbanTest {
   void blockedDemoIbanBelongsToOurBank() {
     assertThat(new Iban("IT60X0542811101000000000099").bankCode()).isEqualTo(new BankCode("05428"));
   }
+
+  @Test
+  void maskedKeepsTheFirstAndLastFourCharacters() {
+    String masked = new Iban("IT60X0542811101000000000001").masked();
+
+    assertThat(masked).isEqualTo("IT60" + "*".repeat(19) + "0001");
+  }
+
+  @Test
+  void maskedKeepsTheLengthOf27Characters() {
+    assertThat(new Iban("IT60X0542811101000000000001").masked()).hasSize(27);
+  }
+
+  @Test
+  void maskedIsComputedOnTheNormalizedIban() {
+    String masked = new Iban(" it60 x054 2811 1010 0000 0000 001 ").masked();
+
+    assertThat(masked).isEqualTo("IT60" + "*".repeat(19) + "0001");
+  }
+
+  @Test
+  void maskedNeverContainsTheMiddleOfTheIban() {
+    String iban = "IT60X0542811101000000000001";
+
+    String masked = new Iban(iban).masked();
+
+    assertThat(masked).doesNotContain("X05428111010000000000");
+    assertThat(masked).doesNotContain(iban.substring(4, 23));
+    assertThat(masked).doesNotContain("05428");
+  }
+
+  @Test
+  void maskedOfAnotherBank() {
+    String masked = new Iban("IT60X0306909606100000012345").masked();
+
+    assertThat(masked).isEqualTo("IT60" + "*".repeat(19) + "2345");
+  }
 }

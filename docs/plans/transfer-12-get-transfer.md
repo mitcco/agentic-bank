@@ -1,0 +1,102 @@
+# transfer-12: GET di un bonifico per id (piano, scope ridotto)
+
+Stato: **in attesa di approvazione**. Si lavora su `main`; il commit lo fa l'utente. Scope deciso dall'utente: **solo il `GET /transfers/{id}`, senza controllo di proprieta ne autenticazione** (nessun owner, nessun header di identita, nessuna migration, nessuna dipendenza). L'idea iniziale, visibile solo al proprietario del conto mittente, e stata scartata perche il progetto non ha ne autenticazione ne il concetto di proprietario; arrivera con il frontend.
+
+Il piano usa solo **interfacce e classi nuove** (porta in, porta out, service, controller, servicedto). L'unica modifica a una classe esistente e un metodo in piu in `WebExceptionHandler`: **nessuno dei 637 test esistenti cambia**.
+
+## Aggiornamenti dopo il review (richiesti dall'utente)
+- **Dati salvati non validi.** Se la lettura trova un importo non rappresentabile a 2 decimali (colonna `NUMERIC(19,4)`) o un IBAN salvato non valido, `GetTransferServiceImpl` lancia la nuova `StoredTransferDataException` (messaggio fisso "Stored transfer data is not valid", senza causa) e `WebExceptionHandler` la mappa a **500** con detail fisso e `instance` `/transfers`. Prima: `ArithmeticException` (500 generico) e `IllegalArgumentException` (400 fuorviante). Il `catch` e stretto, senza log e senza causa. Coperto da 4 classi di test nuove (`StoredTransferDataExceptionTest`, `GetTransferServiceImplStoredDataTest`, `TransferQueryStoredDataControllerTest`, `TransferQueryStoredDataEndToEndTest`). Totale: 744 test.
+- **Rischi dichiarati dal reviewer:** una differenza di tempo tra id interno (1 query) ed esterno o inesistente (2 query) non rivela nulla in piu della risposta; nessun rate limiting; id con `/` danno il 404 di default di Spring senza IBAN; un id vuoto da 400. I bonifici nuovi usano UUID casuali.
+
+## Fatti verificati nel codice
+- Porte esistenti: `TransferRepositoryOutPort` ha solo `save` ed e usata come `@Mock` in `CreateTransferServiceImplTest`; `ExternalTransferRepositoryOutPort` (`save`, `findByIdForUpdate` con lock e transazione obbligatoria, `findInProgressIdsCreatedBefore`) e usata come `@Mock` in due test della saga; non toccandole non c'e rischio per mock, fake o lambda.
+- Adapter JPA: `JpaTransferRepositoryOutPortImpl` ha gia un `findById` pubblico, ma fuori dalla porta. Le entita `TransferEntity` (senza `reason`) ed `ExternalTransferEntity` (con `reason`) hanno repository Spring Data con `findById` standard, senza lock.
+- REST: `TransferController` ha un costruttore con il solo `TransferServiceDto` (usato da `TransferControllerTest`); `TransferServiceDto` e `CreateTransferInPort` sono usate come lambda nei test; `TransferResponseDto(transferId, transferStatus, reasons)` e il mapper MapStruct `TransferResultDtoToTransferResponseDtoMapper` esistono gia; `WebExceptionHandler` mappa `AccountNotFoundException` (404), `InsufficientFundException` e `DifferentCurrencyException` (422), `FraudCheckUnavailableException` (503) e `IllegalArgumentException` (400).
+- Formato degli id: `tr1..tr3`, `demo-tr-001..040`, `demo-ext-001..010` e UUID per i bonifici nuovi: nessun formato si puo imporre.
+- Motivi salvati: i `REJECTED` interni non hanno il motivo (tabella `transfer` senza colonna). Per gli esterni `reason` e una stringa singola; per il rifiuto dell'antifrode contiene i motivi uniti con `"; "`.
+- Contratti: non esiste un contratto REST del Transfer (in `docs/contracts/` ci sono solo `fraud-check.md` e `transfer-notification.md`).
+
+## Obiettivo
+Esporre `GET /transfers/{id}`, che restituisce stato e motivi di un bonifico interno (`transfer`) o esterno (`external_transfer`). Dopo un 202 (`SENT` o `UNKNOWN`) il client puo interrogare lo stato finche non diventa definitivo.
+
+## Ambiguita (il piano segue le raccomandazioni R)
+1. **DTO di risposta: deciso dall'utente, con IBAN (mascherato) e importo.** Nuovo `TransferDetailsResponseDto(transferId, sourceIbanMasked, destIbanMasked, amount, currency, transferStatus, reasons)`; **non si riusa** `TransferResponseDto`. Gli IBAN **non escono mai per intero**: l'utente ha scelto di mascherarli (alternative scartate: cifrare i campi, perche senza autenticazione la chiave dovrebbe essere condivisa con chiunque; solo HTTPS, che e infrastruttura; nessuna protezione).
+   **Regola di mascheramento, esatta:** `Iban.masked()` nel dominio (value object, metodo nuovo e puro): primi 4 caratteri + `*` ripetuto (lunghezza - 8) volte + ultimi 4 caratteri, sull'IBAN gia normalizzato; la lunghezza resta di 27 caratteri. Esempio: `IT60X0542811101000000000001` -> `IT60` + 19 asterischi + `0001`; `IT60X0306911101000000000009` -> `IT60` + 19 asterischi + `0009`. Il mascheramento si fa **nell'application** (`GetTransferServiceImpl`), cosi il DTO dell'application non porta mai l'IBAN intero e nessun adapter puo dimenticarlo; l'IBAN intero esiste solo in `StoredTransferDto`, dalla porta out al service.
+   `amount` e riportato a 2 decimali (la colonna e `NUMERIC(19,4)` e si rilegge con 4: `setScale(2)` esatto, perche l'invariante del dominio garantisce al piu 2 decimali); `currency` in chiaro. Senza controllo di accesso **chiunque conosca l'id legge IBAN mascherati, importo, valuta, stato e motivi**: esposizione dichiarata e documentata. IBAN e importi **mai** nei log, negli errori e nei `toString()` dei DTO (convenzione di `PendingNotificationDto` e `ClearingInstructionDto`).
+2. **Motivi.** Interni `REJECTED`: **lista vuota** (limite dichiarato, nessuna migration). Esterni: `reason` null o vuota -> lista vuota; altrimenti **`reason.split("; ")`**, cosi un rifiuto dell'antifrode con piu motivi ha la stessa lista del POST, e i motivi della stanza (stringhe fisse senza `"; "`) diventano una lista di un elemento. Limite: un motivo che contiene `"; "` verrebbe spezzato (oggi nessuno lo contiene).
+3. **Codici di risposta. R:** **200** per qualsiasi stato trovato, **anche `SENT` e `UNKNOWN`** (il GET legge, non accetta nulla: il 202 resta solo per il POST); **404** con il dettaglio fisso "Transfer not found" per un id inesistente; **nessun 400 di formato**: qualsiasi id e accettato e un id malformato e semplicemente "non trovato".
+4. **Porte. R:** porta in nuova `GetTransferInPort`: `TransferDetailsDto getTransfer(String transferId)`, con il nuovo DTO dell'application `TransferDetailsDto(String transferId, String sourceIbanMasked, String destIbanMasked, BigDecimal amount, String currency, String status, List<String> reasons)` (nessun oggetto di dominio esposto; `TransferResultDto` non basta piu perche non porta importo e IBAN); porta out **nuova e separata** `TransferQueryOutPort`: `Optional<StoredTransferDto> findById(String transferId)`, con il nuovo record `StoredTransferDto(String transferId, String sourceIban, String destIban, BigDecimal amount, String currency, TransferStatusEnum status, String reason)`. Non si aggiungono metodi a `TransferRepositoryOutPort` ne a `ExternalTransferRepositoryOutPort`, e non si riusa `findByIdForUpdate`.
+5. **Dove si cercano le due tabelle. R: nell'adapter postgres**, in un'unica implementazione `JpaTransferQueryOutPortImpl`: prima `transfer`, poi `external_transfer`, entrambe con `findById` di Spring Data, senza lock. Gli id sono univoci in pratica; se mai esistessero in entrambe, vince l'interno (dichiarato).
+6. **Service. R: `GetTransferServiceImpl`** con solo `@Service`; niente `@Transactional(readOnly = true)` (due letture indipendenti senza caricamento lazy). Id null: NPE; id vuoto o di soli spazi: `IllegalArgumentException` (400); dal path non arriva mai vuoto. Nessun log (o DEBUG con il solo id).
+7. **Rest-adapter. R: un controller nuovo `TransferQueryController`** e un servicedto nuovo `TransferQueryServiceDto` / `TransferQueryServiceDtoImpl`. `TransferController`, il suo costruttore e `TransferServiceDto` restano invariati. Nuova eccezione `TransferNotFoundException` (application) e un metodo in piu in `WebExceptionHandler` che la porta a 404.
+8. **Nessun controllo di proprieta ne autenticazione** (scope deciso dall'utente). Header di identita, colonna `owner_id` e Spring Security con JWT sono solo evoluzioni future, con il frontend.
+
+## Modifiche per file
+**transfer-domain** (`com.bank.transfer.domain`)
+| File | Tipo | Responsabilita |
+|---|---|---|
+| `Iban.java` | modificato (solo un metodo aggiunto) | `public String masked()`: primi 4 caratteri + asterischi + ultimi 4, secondo la regola dell'ambiguita 1. Costruttore, normalizzazione e metodi esistenti invariati |
+
+**transfer-application** (`com.bank.transfer.application`)
+| File | Tipo | Responsabilita |
+|---|---|---|
+| `port/in/GetTransferInPort.java` | nuovo | `TransferDetailsDto getTransfer(String transferId)` |
+| `port/out/TransferQueryOutPort.java` | nuovo | `Optional<StoredTransferDto> findById(String transferId)`: lettura senza lock da bonifici interni ed esterni |
+| `dto/StoredTransferDto.java` | nuovo | `record(String transferId, String sourceIban, String destIban, BigDecimal amount, String currency, TransferStatusEnum status, String reason)`: tutti obbligatori tranne `reason` (NPE col nome del campo); `toString()` con il solo `transferId` (mai IBAN ne importo) |
+| `dto/TransferDetailsDto.java` | nuovo | `record(String transferId, String sourceIbanMasked, String destIbanMasked, BigDecimal amount, String currency, String status, List<String> reasons)`: campi obbligatori con NPE col nome; `reasons` null diventa lista vuota (copia immutabile); `toString()` con il solo `transferId` |
+| `exception/TransferNotFoundException.java` | nuovo | `RuntimeException` (non `IllegalArgumentException`) con messaggio fisso "Transfer not found" |
+| `service/GetTransferServiceImpl.java` | nuovo | `@Service`, implementa `GetTransferInPort`. Costruttore `(TransferQueryOutPort)`. Valida l'id, cerca il bonifico, lancia `TransferNotFoundException` se manca, altrimenti restituisce `new TransferDetailsDto(...)` con gli IBAN **mascherati** (`new Iban(valore).masked()`), `amount.setScale(2)`, `status.name()` e i motivi dell'ambiguita 2 |
+
+**transfer-postgres-adapter** (`com.bank.transfer.postgres`)
+| File | Tipo | Responsabilita |
+|---|---|---|
+| `port/out/postgres/impl/jpa/JpaTransferQueryOutPortImpl.java` | nuovo | `@Repository`, implementa `TransferQueryOutPort`. Costruttore `(SpringDataTransferRepository, SpringDataExternalTransferRepository)`. `requireNonNull`; poi `transfer` (reason null), altrimenti `external_transfer` (con reason), altrimenti vuoto; mappa in `StoredTransferDto` con IBAN, importo e valuta letti dalle entita (importo a 4 decimali: lo riporta a 2 il service). Nessuna modifica a entita, repository o migration |
+
+**transfer-rest-adapter** (`com.bank.transfer.rest`)
+| File | Tipo | Responsabilita |
+|---|---|---|
+| `dto/response/TransferDetailsResponseDto.java` | nuovo | `record(String transferId, String sourceIbanMasked, String destIbanMasked, BigDecimal amount, String currency, String transferStatus, List<String> reasons)` |
+| `mapper/TransferDetailsDtoToTransferDetailsResponseDtoMapper.java` | nuovo | MapStruct: `status` -> `transferStatus`, gli altri campi per nome (i valori mascherati passano invariati); la lista `reasons` viene copiata |
+| `servicedto/TransferQueryServiceDto.java` | nuovo | `TransferDetailsResponseDto getTransfer(String transferId)` |
+| `servicedto/internal/TransferQueryServiceDtoImpl.java` | nuovo | `@Service`, costruttore `(GetTransferInPort, TransferDetailsDtoToTransferDetailsResponseDtoMapper)` |
+| `port/in/rest/TransferQueryController.java` | nuovo | `@GetMapping("/transfers/{id}") TransferDetailsResponseDto getTransfer(@PathVariable String id)`: sempre 200 se trovato. Javadoc: "no access control: anyone who knows the id reads the transfer (IBANs masked, amount and currency in clear)" |
+| `port/in/rest/exception/WebExceptionHandler.java` | modificato (solo un metodo aggiunto) | `@ExceptionHandler(TransferNotFoundException.class)` porta a `ProblemDetail` 404 con il dettaglio del messaggio fisso. Gli handler esistenti restano invariati |
+
+`TransferResponseDto` e il suo mapper restano invariati e non vengono usati dal GET. Nessuna modifica a: `TransferController`, `TransferServiceDto(Impl)`, `TransferRepositoryOutPort`, `ExternalTransferRepositoryOutPort`, implementazioni JPA esistenti, pom, migration, `application.properties`.
+
+**transfer-service/CLAUDE.md** (fase 2, **da autorizzare**): nuova sottosezione "Lettura di un bonifico": `GET /transfers/{id}`, cerca nelle due tabelle, risponde 200 con `transferId`, `sourceIbanMasked`, `destIbanMasked` (primi 4 e ultimi 4 caratteri, il resto asterischi), `amount`, `currency`, `transferStatus` e `reasons`, 404 "Transfer not found". Limiti: **nessun controllo di accesso** (chiunque conosca l'id legge; il mascheramento non e crittografia; evoluzione: autenticazione, proprieta e TLS con il frontend); motivi dei rifiuti interni non salvati (lista vuota); motivi esterni spezzati su `"; "`. In "Limiti e rischi" della Saga si toglie "nessun `GET` dei bonifici".
+
+## Test attesi (prima del codice, stesso package)
+**`IbanTest`** (domain, **solo test nuovi in coda**; i 6 esistenti restano invariati): `maskedKeepsTheFirstAndLastFourCharacters` (`IT60X0542811101000000000001` -> `IT60` + 19 `*` + `0001`); `maskedKeepsTheLengthOf27Characters`; `maskedIsComputedOnTheNormalizedIban` (`" it60 x054 2811 1010 0000 0000 001 "` -> stesso valore); `maskedNeverContainsTheMiddleOfTheIban` (la parte centrale `X05428111010000000000` non compare); `maskedOfAnotherBank` (`IT60X0306909606100000012345` -> `IT60` + 19 `*` + `2345`).
+**`GetTransferServiceImplTest`** (application; la porta out come lambda: nuova interfaccia con un solo metodo; IBAN interi in ingresso, mascherati in uscita): `internalCompletedHasNoReasons` (`("t-1", ..., COMPLETED, null)` -> stato `COMPLETED`, `reasons` `[]`, IBAN mascherati, importo a 2 decimali, valuta); `maskedIbansNeverContainTheMiddleOfTheOriginals`; `amountIsReturnedWithTwoDecimals` (importo `10.5000` in ingresso -> `10.50`, con `isEqualByComparingTo`); `internalRejectedHasNoReasonsBecauseTheyAreNotStored`; `externalSentAndUnknownHaveNoReasons`;
+`externalRejectedReasonBecomesAOneElementList` ("Rejected by the clearing house"); `joinedFraudReasonsAreSplitBack` ("A; B" -> `["A", "B"]`); `blankReasonIsAnEmptyList`; `missingTransferIsNotFound` (`TransferNotFoundException`, messaggio "Transfer not found"); `nullOrBlankIdIsRefusedBeforeTheLookup` (NPE; `IllegalArgumentException`; porta mai chiamata).
+**`StoredTransferDtoTest`:** ogni campo tranne `reason` null da NPE col nome del campo; `reason` null e ammesso; `toString()` contiene il `transferId` ma non gli IBAN ne l'importo. **`TransferDetailsDtoTest`:** campo null da NPE col nome; `reasons` null diventa lista vuota; la lista e immutabile e copiata; `toString()` senza IBAN mascherati ne importo. **`TransferNotFoundExceptionTest`:** messaggio fisso; non e una `IllegalArgumentException`; nessuna causa.
+**`JpaTransferQueryOutPortImplTest`** (postgres, `@DataJpaTest`, `@Import` di `JpaTransferQueryOutPortImpl` e delle implementazioni JPA di account, transfer ed external transfer; conti e id propri, non `demo-*`): `findsAnInternalTransferWithItsFields` (IBAN interi, importo, valuta, stato, `reason` null); `findsAnExternalTransferWithItsReason`; `findsAnExternalSentTransfer`; `unknownIdIsEmpty`; `readsWithoutLocking` (lock mode non `PESSIMISTIC_WRITE`); `nullIdIsRefused` (NPE).
+**`TransferQueryControllerTest`** (rest; MockMvc standalone con `WebExceptionHandler`, servicedto come lambda): `returns200WithTheDetailsOfASentTransfer` (200, non 202; JSON con `transferId`, `sourceIbanMasked`, `destIbanMasked`, `amount`, `currency`, `transferStatus`, `reasons`); `returns200WithTheReasonsOfARejectedTransfer`; `returns404WhenTheTransferDoesNotExist` (problem+json, `detail` "Transfer not found"; il corpo non contiene id ne IBAN); `passesTheIdAsItIs` (`demo-ext-001`).
+**`TransferQueryServiceDtoImplTest`** (rest): il risultato viene mappato in `TransferDetailsResponseDto` (stato -> `transferStatus`, valori mascherati invariati); `TransferNotFoundException` si propaga tale e quale.
+**`TransferQueryEndToEndTest`** (bootstrap, `@SpringBootTest` su `jdbc:h2:mem:transferquery`, MockMvc, `OutputCaptureExtension`, antifrode `@Primary` sempre ALLOWED, scheduler spenti; si iniettano il simulatore e `ProcessClearingOutcomesInPort`; conti propri con IBAN `IT60X0542811101000000` + `Q%05d`): `externalTransferIsReadAsSentThenCompleted` (ACCEPT: POST 202 `SENT`, GET `SENT`, `processOutcomes()`, GET `COMPLETED`);
+`externalRejectionIsReadWithTheReason` (REJECT); `internalTransferIsReadAsCompleted`; `seededTransfersCanBeRead` (`tr1` -> `COMPLETED`, `sourceIbanMasked` = `IT60` + 19 `*` + `0001`, `destIbanMasked` = `IT60` + 19 `*` + `0002`, importo `100.00`, `EUR`; `demo-ext-009` -> `SENT`, `IT60` + 19 `*` + `0149` verso `IT60` + 19 `*` + `0009`, importo `457.57`: se un altro test del contesto lo ha riconciliato, accettare lo stato `SENT` o `REJECTED` ma non gli altri campi); `responsesNeverContainAFullIban` (nei corpi di tutti i casi non compare nessun IBAN intero, per esempio `IT60X0542811101000000000001`); `unknownIdAnswers404`; `logsNeverContainIbansNorAmounts` (`@AutoConfigureMockMvc(print = MockMvcPrint.NONE)`, come `FraudCheckEndToEndTest`, altrimenti MockMvc stampa i corpi nell'output catturato).
+
+## Criteri di accettazione
+- `.\mvnw.cmd test` da `transfer-service/` verde: **i 637 test esistenti invariati**, piu i nuovi. L'unica modifica a un file di test esistente e l'aggiunta in coda di test nuovi a `IbanTest` (nessun test esistente cambia).
+- Nessuna dipendenza, migration o nuovo modulo. Interfacce e costruttori esistenti invariati; le uniche classi esistenti modificate sono `Iban` (un metodo `masked()` aggiunto) e `WebExceptionHandler` (un metodo aggiunto).
+- `GET /transfers/{id}` risponde 200 con IBAN **mascherati**, importo, valuta, stato e motivi per bonifici interni ed esterni in tutti gli stati salvati, 404 per id inesistenti. Letture senza lock; nessun IBAN intero nella risposta, nei log, negli errori e nei `toString()`.
+- La porta in non espone oggetti di dominio; la ricerca nelle due tabelle sta nell'adapter. Log senza IBAN ne importi; solo caratteri ASCII.
+
+## Rischi
+- **Nessun controllo di accesso:** chiunque conosca o indovini un id legge importo, valuta, stato, motivi e IBAN **mascherati** (4 caratteri iniziali e 4 finali visibili); gli id demo sono prevedibili. Il mascheramento riduce ma non elimina l'esposizione: non e crittografia ne controllo di accesso. Accettato per lo scopo didattico e documentato; la protezione vera (autenticazione, proprieta, TLS) arrivera con il frontend.
+- **Motivi incompleti:** i rifiuti interni restano senza motivi, i motivi esterni sono ricostruiti con uno split.
+- **Lettura non bloccante:** subito dopo un 202 il GET puo restituire `SENT` mentre un esito e in corso di applicazione: corretto (nessuna promessa di coerenza istantanea).
+- **Id presente in entrambe le tabelle** (teorico): vince l'interno.
+- **Nuovi bean per scansione** (`GetTransferServiceImpl`, `JpaTransferQueryOutPortImpl`, `TransferQueryServiceDtoImpl`, `TransferQueryController`): tipi nuovi, nessuna ambiguita di iniezione.
+
+## Fuori perimetro
+Autenticazione e proprieta dei conti (header di identita, `owner_id` con V4, Spring Security piu JWT); cifratura dei campi della risposta (scartata dall'utente: senza autenticazione la chiave sarebbe condivisa con chiunque) e TLS (infrastruttura); IBAN interi nella risposta; ruoli; elenco dei bonifici e paginazione; colonna dei motivi per i rifiuti interni; contratto REST del Transfer; frontend; commit.
+
+## Fasi e passi interni (ogni passo lascia la build verde)
+| Fase | Contenuto | Dipende da | Rischio |
+|---|---|---|---|
+| 1. GET | **P0:** `Iban.masked()` con i suoi test in coda a `IbanTest`. **P1:** `StoredTransferDto`, `TransferDetailsDto`, `TransferQueryOutPort`, `TransferNotFoundException` con i loro test. **P2:** `JpaTransferQueryOutPortImpl` con il test JPA. **P3:** `GetTransferInPort` e `GetTransferServiceImpl` con il test. **P4:** servicedto, controller, handler 404 con i test. **P5:** `TransferQueryEndToEndTest`. Dopo ogni passo `.\mvnw.cmd test` | - | basso |
+| 2. Documentazione | `transfer-service/CLAUDE.md` (da autorizzare) | 1 | basso |
+
+Ordine: il service (P3) richiede la porta out, quindi va dopo l'implementazione JPA (P2); il servicedto (P4) richiede la porta in, quindi va dopo il service.

@@ -23,4 +23,9 @@ public record Iban(String value) {
   public BankCode bankCode() {
     return new BankCode(value.substring(5, 10));
   }
+
+  /** First 4 characters, then asterisks, then last 4 characters of the normalized IBAN. */
+  public String masked() {
+    return value.substring(0, 4) + "*".repeat(value.length() - 8) + value.substring(value.length() - 4);
+  }
 }

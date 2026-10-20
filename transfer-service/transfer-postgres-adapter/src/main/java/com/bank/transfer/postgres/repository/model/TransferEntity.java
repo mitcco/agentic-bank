@@ -8,6 +8,7 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "transfer")
@@ -31,6 +32,10 @@ public class TransferEntity {
   @Enumerated(EnumType.STRING)
   @Column(nullable = false, length = 20)
   private TransferStatusEnum status;
+
+  /** Written by the database default only, in the time zone of the JDBC session (the JVM one). */
+  @Column(name = "created_at", insertable = false, updatable = false)
+  private LocalDateTime createdAt;
 
   protected TransferEntity() {
   }
@@ -67,5 +72,9 @@ public class TransferEntity {
 
   public TransferStatusEnum getStatus() {
     return status;
+  }
+
+  public LocalDateTime getCreatedAt() {
+    return createdAt;
   }
 }
