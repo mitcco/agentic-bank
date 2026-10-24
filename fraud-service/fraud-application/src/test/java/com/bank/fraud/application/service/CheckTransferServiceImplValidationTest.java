@@ -21,7 +21,7 @@ class CheckTransferServiceImplValidationTest {
     private static final String FIXED_MESSAGE = "Fraud check request is not valid";
 
     private final FakeBlockedIbanOutPort port = new FakeBlockedIbanOutPort();
-    private final CheckTransferServiceImpl service = new CheckTransferServiceImpl(port, new BigDecimal("10000"));
+    private final CheckTransferServiceImpl service = new CheckTransferServiceImpl(port, new BigDecimal("10000"), new RecordingMetricsOutPort());
 
     private static FraudCheckRequestDto request(String id, String source, String destination, String amount, String currency) {
         return new FraudCheckRequestDto(id, source, destination, amount == null ? null : new BigDecimal(amount), currency);

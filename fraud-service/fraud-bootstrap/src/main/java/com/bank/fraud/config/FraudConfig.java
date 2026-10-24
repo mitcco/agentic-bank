@@ -2,8 +2,11 @@ package com.bank.fraud.config;
 
 import com.bank.fraud.application.port.in.CheckTransferInPort;
 import com.bank.fraud.application.port.out.BlockedIbanOutPort;
+import com.bank.fraud.application.port.out.MetricsOutPort;
 import com.bank.fraud.application.service.CheckTransferServiceImpl;
 import com.bank.fraud.memory.port.out.memory.impl.InMemoryBlockedIbanOutPortImpl;
+import com.bank.fraud.micrometer.port.out.micrometer.impl.MicrometerMetricsOutPortImpl;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -24,8 +27,14 @@ class FraudConfig {
     }
 
     @Bean
+    MetricsOutPort metricsOutPort(MeterRegistry registry) {
+        return new MicrometerMetricsOutPortImpl(registry);
+    }
+
+    @Bean
     CheckTransferInPort checkTransferInPort(BlockedIbanOutPort blockedIbanOutPort,
-                                            @Value("${fraud.threshold}") BigDecimal threshold) {
-        return new CheckTransferServiceImpl(blockedIbanOutPort, threshold);
+                                            @Value("${fraud.threshold}") BigDecimal threshold,
+                                            MetricsOutPort metricsOutPort) {
+        return new CheckTransferServiceImpl(blockedIbanOutPort, threshold, metricsOutPort);
     }
 }

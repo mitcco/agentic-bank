@@ -33,6 +33,7 @@
 		<module>fraud-application</module>
 		<module>fraud-rest-adapter</module>
 		<module>fraud-memory-adapter</module>
+		<module>fraud-micrometer-adapter</module>
 		<module>fraud-bootstrap</module>
 	</modules>
 
@@ -61,6 +62,11 @@
 			<dependency>
 				<groupId>com.bank</groupId>
 				<artifactId>fraud-memory-adapter</artifactId>
+				<version>${project.version}</version>
+			</dependency>
+			<dependency>
+				<groupId>com.bank</groupId>
+				<artifactId>fraud-micrometer-adapter</artifactId>
 				<version>${project.version}</version>
 			</dependency>
 			<dependency>

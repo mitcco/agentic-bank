@@ -4,10 +4,12 @@ import com.bank.transfer.application.command.CreateTransferCommand;
 import com.bank.transfer.application.dto.FraudCheckResultDto;
 import com.bank.transfer.application.dto.TransferNotificationDto;
 import com.bank.transfer.application.dto.TransferResultDto;
+import com.bank.transfer.application.dto.TransferTypeEnum;
 import com.bank.transfer.application.exception.AccountNotFoundException;
 import com.bank.transfer.application.port.in.CreateInternalTransferInPort;
 import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
+import com.bank.transfer.application.port.out.MetricsOutPort;
 import com.bank.transfer.application.port.out.NotificationOutPort;
 import com.bank.transfer.application.port.out.TransferRepositoryOutPort;
 import com.bank.transfer.domain.Account;
@@ -15,10 +17,12 @@ import com.bank.transfer.domain.FraudStatusEnum;
 import com.bank.transfer.domain.Iban;
 import com.bank.transfer.domain.Money;
 import com.bank.transfer.domain.Transfer;
+import com.bank.transfer.domain.TransferStatusEnum;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Stream;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -31,10 +35,13 @@ public class CreateTransferServiceImpl implements CreateInternalTransferInPort {
   private final FraudCheckOutPort fraudCheckOutPort;
   private final NotificationOutPort notificationOutPort;
   private final TransactionTemplate transactionTemplate;
+  private final MetricsOutPort metricsOutPort;
 
   public CreateTransferServiceImpl(AccountRepositoryOutPort accountRepositoryOutPort,
     TransferRepositoryOutPort transferRepositoryOutPort, FraudCheckOutPort fraudCheckOutPort,
-    NotificationOutPort notificationOutPort, TransactionTemplate transactionTemplate) {
+    NotificationOutPort notificationOutPort, TransactionTemplate transactionTemplate,
+    MetricsOutPort metricsOutPort) {
+    this.metricsOutPort = Objects.requireNonNull(metricsOutPort, "metricsOutPort");
     this.accountRepositoryOutPort = accountRepositoryOutPort;
     this.transferRepositoryOutPort = transferRepositoryOutPort;
     this.fraudCheckOutPort = fraudCheckOutPort;
@@ -56,7 +63,7 @@ public class CreateTransferServiceImpl implements CreateInternalTransferInPort {
       fraudCheckOutPort.checkFraud(transfer.id(), source.value(), dest.value(), money.amount(),
         money.currency());
 
-    return transactionTemplate.execute(status -> {
+    TransferResultDto result = transactionTemplate.execute(status -> {
       if (FraudStatusEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
         Transfer completed = completeTransfer(transfer);
         notificationOutPort.publish(toNotification(completed, List.of()));
@@ -69,6 +76,10 @@ public class CreateTransferServiceImpl implements CreateInternalTransferInPort {
 
       return new TransferResultDto(rejected.id(), rejected.status().name(), fraudCheckResultDto.reasons());
     });
+    TransferStatusEnum outcome = TransferStatusEnum.valueOf(result.transferStatus());
+    metricsOutPort.transferRequested(TransferTypeEnum.INTERNAL, outcome);
+    metricsOutPort.transferConcluded(TransferTypeEnum.INTERNAL, outcome);
+    return result;
   }
 
   private static TransferNotificationDto toNotification(Transfer concluded, List<String> reasons) {
@@ -109,7 +120,7 @@ public class CreateTransferServiceImpl implements CreateInternalTransferInPort {
     Map<Iban, Account> accountsMap = new HashMap<>();
     for (Iban iban : ordered) {
       accountsMap.put(iban, accountRepositoryOutPort.findByIbanForUpdate(iban)
-                              .orElseThrow(() -> new AccountNotFoundException("Account not found for IBAN: " + iban.value())));
+                              .orElseThrow(() -> new AccountNotFoundException("Account not found")));
     }
     return accountsMap;
   }

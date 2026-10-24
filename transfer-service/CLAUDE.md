@@ -31,6 +31,7 @@ Conti e bonifici. Package base: `com.bank.transfer`.
 | `transfer-fraud-adapter` | Client HTTP verso il Fraud (`HttpFraudCheckOutPortImpl` implementa `FraudCheckOutPort`, `FraudRestClientFactory`, DTO HTTP) |
 | `transfer-kafka-adapter` | Producer Kafka del publisher dell'outbox (`KafkaNotificationSenderOutPortImpl` implementa `NotificationSenderOutPort`) |
 | `transfer-clearing-adapter` | Stanza di compensazione simulata in memoria (`SimulatedClearingHouseOutPortImpl` implementa `ClearingHouseOutPort`, Java puro) |
+| `transfer-micrometer-adapter` | Implementa `MetricsOutPort` con contatori e gauge Micrometer (`MicrometerMetricsOutPortImpl`) |
 | `transfer-bootstrap` | `TransferApplication`, `config/FraudConfig`, `config/ClockConfig`, `config/NotificationPublisher*`, `config/TransferRoutingConfig`, `config/Clearing*`, `application.properties`, test di integrazione |
 
 ## Publisher dell'outbox
@@ -38,6 +39,8 @@ Il publisher delle notifiche è spento di default: si accende con la variabile
 `NOTIFICATION_PUBLISHER_ENABLED=true` (broker su `KAFKA_BOOTSTRAP_SERVERS`,
 default `localhost:9092`). Con il default `false` le notifiche restano nella
 tabella `outbox` e all'avvio compare un WARN.
+Nel `docker-compose.yaml` il container `transfer` (profilo `apps`) parte invece con il publisher
+e `CLEARING_OUTCOMES_ENABLED` accesi (`true`): i default di `application.properties` restano `false`.
 
 ## Bonifici esterni (Saga)
 Un solo `POST /transfers`: `TransferRoutingServiceImpl` confronta l'ABI del
@@ -213,6 +216,44 @@ dimostrativi **deterministici**, solo se mancano:
   gli id `demo-*` sono riservati al seed: i test nuovi non devono usarli. Ogni
   contesto `@SpringBootTest` semina circa 106 righe in piu (H2, trascurabile).
 
+## Metriche di business
+Esportate su `/actuator/prometheus` (tag comune `application=transfer`). Porta out
+`MetricsOutPort` (solo enum e numeri, mai `Transfer`, IBAN o importi); adapter
+`transfer-micrometer-adapter`, bean in `config/MetricsConfig`. Dashboard:
+`monitoring/grafana/dashboards/bank-business.json`.
+- `bank.transfer.requests{type,status}`: esito restituito al client dal `POST`, una per
+  richiesta riuscita (`COMPLETED`, `REJECTED`, `SENT`, `UNKNOWN`).
+- `bank.transfer.concluded{type,status}`: un bonifico raggiunge davvero `COMPLETED` o
+  `REJECTED`, cioe quando si scrive nell'outbox. `SENT` e `UNKNOWN` **non** sono stati finali:
+  per questo ci sono due contatori e un bonifico non conta due volte nello stesso.
+- `bank.transfer.refunds{cause}`: ogni riaccredito di un esterno gia addebitato
+  (`CLEARING_UNAVAILABLE`, `CLEARING_REJECTED`, `NOT_FOUND_AT_CLEARING`). Il rifiuto
+  antifrode non e un rimborso.
+- `bank.transfer.reconciliations{outcome}`: un esito per ogni id esaminato da `reconcileStale`
+  (`COMPLETED`, `REJECTED`, `NOT_FOUND`, `SKIPPED`, `FAILED`).
+- `bank.transfer.outbox.published`: `send` confermato dal broker, contato prima del `delete`.
+  Se il `delete` fallisce la riga e rispedita e contata di nuovo (consegna almeno una volta).
+- `bank.transfer.outbox.pending` (gauge): righe in attesa nell'outbox, aggiornato da uno
+  scheduler (`transfer.metrics.outbox.enabled`, default `true`, ogni 15s) con `count(*)`;
+  lo scrape non legge il database. Vale NaN fino alla prima lettura; in dashboard `max`.
+- **Le metriche si chiamano dopo il commit**, fuori da `transactionTemplate.execute`: un
+  rollback non lascia conteggi. Gli errori che non salvano un bonifico (404, 503, fondi
+  insufficienti, input non valido) non sono nei contatori di business (li copre
+  `http_server_requests`).
+- Sulla compensazione immediata `requests{EXTERNAL,REJECTED}` si conta sempre (la risposta e
+  `REJECTED`); `concluded` e il rimborso solo se l'esito e stato applicato.
+- Se la porta delle metriche lanciasse, l'eccezione si propaga al chiamante: il bonifico gia
+  salvato resta com'e (ad esempio `SENT`, mai `UNKNOWN`) ma il client puo ricevere un 500.
+- Tag sempre `name()` di un enum; mai IBAN, importo, `transferId` o motivo.
+- Il messaggio di `AccountNotFoundException` e fisso ("Account not found") sia in
+  `CreateTransferServiceImpl.getAccountsMap` sia in `AccountReadOnlyInServiceImpl`, e il
+  `WebExceptionHandler` imposta `instance` fisso `/accounts` (Spring altrimenti metterebbe il
+  path richiesto, che contiene l'IBAN). L'IBAN non esce dal corpo del 404 di `GET /accounts/{iban}`.
+  Vale anche per il 404 di `POST /transfers` con conto mancante: lì `instance` e `/accounts`.
+- Se la porta delle metriche lanciasse in `processOutcomes` o `reconcileStale`, dopo un esito gia
+  applicato, l'eccezione esce dal giro (non si conta `FAILED` per un id gia concluso).
+- I contatori sono per istanza e si azzerano al riavvio: solo `rate()` e `increase()`.
+
 ## Struttura dei package degli adapter (modello per gli altri servizi)
 Il package è `com.bank.<svc>.<tecnologia>`, con `<tecnologia>` uguale a quella
 del nome del modulo.
@@ -225,6 +266,7 @@ del nome del modulo.
 - Fraud: `port.out.fraud.impl`.
 - Kafka: `kafka.port.out.kafka.impl`, `kafka.config` (listener degli errori).
 - Clearing: `clearing.port.out.clearing.impl`.
+- Micrometer: `micrometer.port.out.micrometer.impl`.
 
 ## Flusso di una richiesta (rest)
 Controller → `*ServiceDto` (adapter rest) → port.in → service → port.out →

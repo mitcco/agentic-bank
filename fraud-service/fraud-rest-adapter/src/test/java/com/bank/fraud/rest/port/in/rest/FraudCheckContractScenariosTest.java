@@ -54,7 +54,7 @@ class FraudCheckContractScenariosTest {
         LocalValidatorFactoryBean validator = new LocalValidatorFactoryBean();
         validator.afterPropertiesSet();
         mvc = MockMvcBuilders.standaloneSetup(new FraudCheckController(new FraudCheckServiceDtoImpl(
-                        new CheckTransferServiceImpl(port, new BigDecimal("10000")),
+                        new CheckTransferServiceImpl(port, new BigDecimal("10000"), (status, reasons) -> { }),
                         new FraudCheckHttpRequestDtoToFraudCheckRequestDtoMapperImpl(),
                         new FraudCheckResponseDtoToFraudCheckHttpResponseDtoMapperImpl())))
                 .setControllerAdvice(new WebExceptionHandler())

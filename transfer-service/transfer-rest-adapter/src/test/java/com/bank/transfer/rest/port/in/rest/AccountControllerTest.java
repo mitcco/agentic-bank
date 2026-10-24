@@ -47,12 +47,13 @@ class AccountControllerTest {
   @Test
   void returns404WhenAccountDoesNotExist() throws Exception {
     AccountServiceDto service = iban -> {
-      throw new AccountNotFoundException("No account found for iban " + iban);
+      throw new AccountNotFoundException("Account not found");
     };
 
     mockMvcWith(service).perform(get("/accounts/{iban}", IBAN))
         .andExpect(status().isNotFound())
-        .andExpect(jsonPath("$.detail").value("No account found for iban " + IBAN));
+        .andExpect(jsonPath("$.detail").value("Account not found"))
+        .andExpect(jsonPath("$.instance").value("/accounts"));
   }
 
   @Test

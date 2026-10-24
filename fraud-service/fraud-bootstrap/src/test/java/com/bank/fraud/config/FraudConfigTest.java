@@ -34,7 +34,9 @@ class FraudConfigTest {
     private static final String SHORT_IBAN = "IT60X054281110100000000009"; // 26 caratteri
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
-            .withUserConfiguration(FraudConfig.class);
+            .withUserConfiguration(FraudConfig.class)
+            .withBean(io.micrometer.core.instrument.MeterRegistry.class,
+                    io.micrometer.core.instrument.simple.SimpleMeterRegistry::new);
 
     private ApplicationContextRunner with(String threshold, String blocked) {
         return runner.withPropertyValues("fraud.threshold=" + threshold, "fraud.blocked-ibans=" + blocked);

@@ -5,8 +5,11 @@ import com.bank.transfer.application.dto.ClearingDecisionEnum;
 import com.bank.transfer.application.dto.ClearingInstructionDto;
 import com.bank.transfer.application.dto.ClearingOutcomeDto;
 import com.bank.transfer.application.dto.FraudCheckResultDto;
+import com.bank.transfer.application.dto.ReconciliationOutcomeEnum;
+import com.bank.transfer.application.dto.RefundCauseEnum;
 import com.bank.transfer.application.dto.TransferNotificationDto;
 import com.bank.transfer.application.dto.TransferResultDto;
+import com.bank.transfer.application.dto.TransferTypeEnum;
 import com.bank.transfer.application.exception.AccountNotFoundException;
 import com.bank.transfer.application.exception.ClearingHouseUnavailableException;
 import com.bank.transfer.application.port.in.CreateExternalTransferInPort;
@@ -16,6 +19,7 @@ import com.bank.transfer.application.port.out.AccountRepositoryOutPort;
 import com.bank.transfer.application.port.out.ClearingHouseOutPort;
 import com.bank.transfer.application.port.out.ExternalTransferRepositoryOutPort;
 import com.bank.transfer.application.port.out.FraudCheckOutPort;
+import com.bank.transfer.application.port.out.MetricsOutPort;
 import com.bank.transfer.application.port.out.NotificationOutPort;
 import com.bank.transfer.domain.Account;
 import com.bank.transfer.domain.FraudStatusEnum;
@@ -58,11 +62,13 @@ public class ExternalTransferSagaServiceImpl
   private final NotificationOutPort notificationOutPort;
   private final ClearingHouseOutPort clearingHouseOutPort;
   private final TransactionTemplate transactionTemplate;
+  private final MetricsOutPort metricsOutPort;
 
   public ExternalTransferSagaServiceImpl(AccountRepositoryOutPort accountRepositoryOutPort,
     ExternalTransferRepositoryOutPort externalTransferRepositoryOutPort, FraudCheckOutPort fraudCheckOutPort,
     NotificationOutPort notificationOutPort, ClearingHouseOutPort clearingHouseOutPort,
-    TransactionTemplate transactionTemplate) {
+    TransactionTemplate transactionTemplate, MetricsOutPort metricsOutPort) {
+    this.metricsOutPort = Objects.requireNonNull(metricsOutPort, "metricsOutPort");
     this.accountRepositoryOutPort = accountRepositoryOutPort;
     this.externalTransferRepositoryOutPort = externalTransferRepositoryOutPort;
     this.fraudCheckOutPort = fraudCheckOutPort;
@@ -86,12 +92,15 @@ public class ExternalTransferSagaServiceImpl
       fraudCheckOutPort.checkFraud(transfer.id(), source.value(), dest.value(), money.amount(), money.currency());
 
     if (!FraudStatusEnum.ALLOWED.equals(fraudCheckResultDto.decision())) {
-      return transactionTemplate.execute(status -> {
+      TransferResultDto rejectedResult = transactionTemplate.execute(status -> {
         Transfer rejected = transfer.reject();
         externalTransferRepositoryOutPort.save(rejected, String.join("; ", fraudCheckResultDto.reasons()));
         notificationOutPort.publish(toNotification(rejected, fraudCheckResultDto.reasons()));
         return new TransferResultDto(rejected.id(), rejected.status().name(), fraudCheckResultDto.reasons());
       });
+      metricsOutPort.transferRequested(TransferTypeEnum.EXTERNAL, TransferStatusEnum.REJECTED);
+      metricsOutPort.transferConcluded(TransferTypeEnum.EXTERNAL, TransferStatusEnum.REJECTED);
+      return rejectedResult;
     }
 
     Transfer sent = transactionTemplate.execute(status -> {
@@ -112,17 +121,23 @@ public class ExternalTransferSagaServiceImpl
       sent.dest().value(), sent.money().amount(), sent.money().currency());
     try {
       clearingHouseOutPort.submit(instruction);
-      return new TransferResultDto(sent.id(), sent.status().name(), List.of());
     } catch (ClearingHouseUnavailableException e) {
       LOG.warn("Instruction not received for transfer {}: {}", sent.id(), e.getClass().getSimpleName());
-      applyOutcome(new ClearingOutcomeDto(sent.id(), ClearingDecisionEnum.REJECTED, CLEARING_UNAVAILABLE_REASON));
+      applyOutcome(new ClearingOutcomeDto(sent.id(), ClearingDecisionEnum.REJECTED, CLEARING_UNAVAILABLE_REASON),
+        RefundCauseEnum.CLEARING_UNAVAILABLE)
+        .ifPresent(concluded -> recordConclusion(concluded, RefundCauseEnum.CLEARING_UNAVAILABLE));
+      // the client always gets REJECTED here, even if a concurrent outcome had already been applied
+      metricsOutPort.transferRequested(TransferTypeEnum.EXTERNAL, TransferStatusEnum.REJECTED);
       return new TransferResultDto(sent.id(), TransferStatusEnum.REJECTED.name(),
         List.of(CLEARING_UNAVAILABLE_REASON));
     } catch (RuntimeException e) {
       LOG.warn("Clearing house outcome unknown for transfer {}: {}", sent.id(), e.getClass().getSimpleName());
       String status = markUnknownIfSent(sent.id());
+      metricsOutPort.transferRequested(TransferTypeEnum.EXTERNAL, TransferStatusEnum.valueOf(status));
       return new TransferResultDto(sent.id(), status, List.of());
     }
+    metricsOutPort.transferRequested(TransferTypeEnum.EXTERNAL, TransferStatusEnum.SENT);
+    return new TransferResultDto(sent.id(), sent.status().name(), List.of());
   }
 
   private String markUnknownIfSent(String transferId) {
@@ -145,12 +160,17 @@ public class ExternalTransferSagaServiceImpl
     List<ClearingOutcomeDto> outcomes = clearingHouseOutPort.pollOutcomes();
     int applied = 0;
     for (ClearingOutcomeDto outcome : outcomes) {
+      Optional<TransferStatusEnum> concluded;
       try {
-        if (applyOutcome(outcome)) {
-          applied++;
-        }
+        concluded = applyOutcome(outcome, RefundCauseEnum.CLEARING_REJECTED);
       } catch (RuntimeException e) {
         LOG.warn("Outcome failed for transfer {}: {}", outcome.transferId(), e.getClass().getSimpleName());
+        continue;
+      }
+      // metrics outside the try: a failure of the metrics port must not be swallowed as an outcome failure
+      if (concluded.isPresent()) {
+        recordConclusion(concluded.get(), RefundCauseEnum.CLEARING_REJECTED);
+        applied++;
       }
     }
     return applied;
@@ -165,32 +185,55 @@ public class ExternalTransferSagaServiceImpl
     List<String> ids = externalTransferRepositoryOutPort.findInProgressIdsCreatedBefore(createdBefore, maxTransfers);
     int applied = 0;
     for (String id : ids) {
+      boolean notFound;
+      RefundCauseEnum cause;
+      Optional<TransferStatusEnum> concluded;
       try {
-        ClearingOutcomeDto outcome = clearingHouseOutPort.queryStatus(id).orElseGet(() -> {
+        Optional<ClearingOutcomeDto> queried = clearingHouseOutPort.queryStatus(id);
+        notFound = queried.isEmpty();
+        cause = notFound ? RefundCauseEnum.NOT_FOUND_AT_CLEARING : RefundCauseEnum.CLEARING_REJECTED;
+        ClearingOutcomeDto outcome = queried.orElseGet(() -> {
           LOG.info("Transfer {} not found at the clearing house", id);
           return new ClearingOutcomeDto(id, ClearingDecisionEnum.REJECTED, INSTRUCTION_NOT_FOUND_REASON);
         });
-        if (applyOutcome(outcome)) {
-          applied++;
-        }
+        concluded = applyOutcome(outcome, cause);
       } catch (RuntimeException e) {
         LOG.warn("Reconciliation failed for transfer {}: {}", id, e.getClass().getSimpleName());
+        metricsOutPort.reconciliationExamined(ReconciliationOutcomeEnum.FAILED);
+        continue;
+      }
+      // metrics outside the try: a failure of the metrics port must not be swallowed as a reconciliation failure
+      if (concluded.isPresent()) {
+        recordConclusion(concluded.get(), cause);
+        metricsOutPort.reconciliationExamined(notFound ? ReconciliationOutcomeEnum.NOT_FOUND
+          : ReconciliationOutcomeEnum.valueOf(concluded.get().name()));
+        applied++;
+      } else {
+        metricsOutPort.reconciliationExamined(ReconciliationOutcomeEnum.SKIPPED);
       }
     }
     return applied;
   }
 
-  private boolean applyOutcome(ClearingOutcomeDto outcome) {
-    return Boolean.TRUE.equals(transactionTemplate.execute(status -> {
+  private void recordConclusion(TransferStatusEnum concluded, RefundCauseEnum refundCause) {
+    metricsOutPort.transferConcluded(TransferTypeEnum.EXTERNAL, concluded);
+    if (concluded == TransferStatusEnum.REJECTED) {
+      metricsOutPort.transferRefunded(refundCause);
+    }
+  }
+
+  /** Empty when the outcome was ignored; otherwise the status reached. The refund cause is carried by the caller. */
+  private Optional<TransferStatusEnum> applyOutcome(ClearingOutcomeDto outcome, RefundCauseEnum refundCause) {
+    return Optional.ofNullable(transactionTemplate.execute(status -> {
       Optional<Transfer> found = externalTransferRepositoryOutPort.findByIdForUpdate(outcome.transferId());
       if (found.isEmpty()) {
         LOG.warn("Outcome for unknown transfer {}", outcome.transferId());
-        return false;
+        return null;
       }
       Transfer transfer = found.get();
       if (transfer.status() != TransferStatusEnum.SENT && transfer.status() != TransferStatusEnum.UNKNOWN) {
         LOG.info("Duplicate outcome ignored for transfer {}: {}", transfer.id(), transfer.status());
-        return false;
+        return null;
       }
 
       Transfer concluded;
@@ -207,7 +250,7 @@ public class ExternalTransferSagaServiceImpl
         notificationOutPort.publish(toNotification(concluded, List.of(outcome.reason())));
       }
       LOG.info("Outcome applied to transfer {}: {}", concluded.id(), concluded.status());
-      return true;
+      return concluded.status();
     }));
   }
 

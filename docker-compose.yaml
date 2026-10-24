@@ -1,3 +1,8 @@
+# Infrastruttura: parte sempre (`docker compose up -d`).
+# Profili opzionali:
+#   apps        transfer e fraud come container
+#   monitoring  Prometheus e Grafana (raccolgono le metriche dei container `apps`)
+# Tutto insieme: docker compose --profile apps --profile monitoring up -d --build
 services:
   transfer-db:
     image: postgres:17
@@ -10,6 +15,11 @@ services:
       - "5433:5432"
     volumes:
       - transfer-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U transfer -d transfer"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   kafka:
     image: apache/kafka:3.9.0
@@ -55,6 +65,64 @@ services:
       timeout: 5s
       retries: 5
 
+  fraud:
+    profiles: ["apps"]
+    build: ./fraud-service
+    container_name: fraud
+    ports:
+      - "8081:8081"
+
+  transfer:
+    profiles: ["apps"]
+    build: ./transfer-service
+    container_name: transfer
+    depends_on:
+      transfer-db:
+        condition: service_healthy
+      fraud:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://transfer-db:5432/transfer
+      TRANSFER_DB_PASSWORD: ${TRANSFER_DB_PASSWORD:-transfer_dev}
+      FRAUD_BASE_URL: http://fraud:8081
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      # Nel container tutto il flusso e acceso (outbox -> Kafka, esiti della stanza). Fuori dal
+      # compose (IDE, test) i default di application.properties restano `false`.
+      NOTIFICATION_PUBLISHER_ENABLED: ${NOTIFICATION_PUBLISHER_ENABLED:-true}
+      CLEARING_OUTCOMES_ENABLED: ${CLEARING_OUTCOMES_ENABLED:-true}
+    ports:
+      - "8080:8080"
+
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:12.1.0
+    container_name: grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin_dev}
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+
 volumes:
   transfer-db-data:
   notification-mongo-data:
+  prometheus-data:
+  grafana-data:
