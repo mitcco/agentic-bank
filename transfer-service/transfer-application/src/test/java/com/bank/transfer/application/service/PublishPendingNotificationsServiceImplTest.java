@@ -40,7 +40,7 @@ class PublishPendingNotificationsServiceImplTest {
     events = new ArrayList<>();
     pending = new FakePendingPort(events);
     sender = new FakeSenderPort(events);
-    service = new PublishPendingNotificationsServiceImpl(pending, sender);
+    service = new PublishPendingNotificationsServiceImpl(pending, sender, new RecordingMetricsOutPort());
   }
 
   private void threeRows() {

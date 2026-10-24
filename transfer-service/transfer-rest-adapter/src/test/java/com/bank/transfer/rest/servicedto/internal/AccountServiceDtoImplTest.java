@@ -42,7 +42,7 @@ class AccountServiceDtoImplTest {
   @Test
   void propagatesPortExceptions() {
     AccountReadOnlyInPort port = iban -> {
-      throw new AccountNotFoundException("No account found for iban " + iban);
+      throw new AccountNotFoundException("Account not found");
     };
 
     assertThatThrownBy(() -> serviceWith(port).getAccount(IBAN))

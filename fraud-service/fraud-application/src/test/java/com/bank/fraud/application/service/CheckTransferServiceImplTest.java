@@ -27,7 +27,7 @@ class CheckTransferServiceImplTest {
     private static final String DEST_MSG = "Destination IBAN is locked";
 
     private final FakeBlockedIbanOutPort port = new FakeBlockedIbanOutPort();
-    private final CheckTransferServiceImpl service = new CheckTransferServiceImpl(port, new BigDecimal("10000"));
+    private final CheckTransferServiceImpl service = new CheckTransferServiceImpl(port, new BigDecimal("10000"), new RecordingMetricsOutPort());
 
     private static FraudCheckRequestDto request(String id, String source, String destination, String amount, String currency) {
         return new FraudCheckRequestDto(id, source, destination, amount == null ? null : new BigDecimal(amount), currency);
@@ -147,7 +147,7 @@ class CheckTransferServiceImplTest {
 
     @Test
     void sogliaConfigurata5000_testoDelMotivoUsaLaSogliaConfigurata() {
-        CheckTransferServiceImpl s = new CheckTransferServiceImpl(port, new BigDecimal("5000"));
+        CheckTransferServiceImpl s = new CheckTransferServiceImpl(port, new BigDecimal("5000"), new RecordingMetricsOutPort());
 
         FraudCheckResponseDto r = s.checkTransfer(request(IBAN_1, IBAN_2, "6000"));
 
@@ -156,7 +156,7 @@ class CheckTransferServiceImplTest {
 
     @Test
     void sogliaConZeriFinali_testoDelMotivoSenzaZeriFinali() {
-        CheckTransferServiceImpl s = new CheckTransferServiceImpl(port, new BigDecimal("10000.00"));
+        CheckTransferServiceImpl s = new CheckTransferServiceImpl(port, new BigDecimal("10000.00"), new RecordingMetricsOutPort());
 
         FraudCheckResponseDto r = s.checkTransfer(request(IBAN_1, IBAN_2, "10000.01"));
 
@@ -301,20 +301,20 @@ class CheckTransferServiceImplTest {
 
     @Test
     void sogliaNulla_invalidRequest() {
-        assertThatThrownBy(() -> new CheckTransferServiceImpl(port, null))
+        assertThatThrownBy(() -> new CheckTransferServiceImpl(port, null, new RecordingMetricsOutPort()))
                 .isInstanceOf(InvalidFraudRequestException.class);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"0", "-1", "10.001"})
     void sogliaNonValida_invalidRequest(String threshold) {
-        assertThatThrownBy(() -> new CheckTransferServiceImpl(port, new BigDecimal(threshold)))
+        assertThatThrownBy(() -> new CheckTransferServiceImpl(port, new BigDecimal(threshold), new RecordingMetricsOutPort()))
                 .isInstanceOf(InvalidFraudRequestException.class);
     }
 
     @Test
     void portaNulla_nullPointerException() {
-        assertThatThrownBy(() -> new CheckTransferServiceImpl(null, new BigDecimal("10000")))
+        assertThatThrownBy(() -> new CheckTransferServiceImpl(null, new BigDecimal("10000"), new RecordingMetricsOutPort()))
                 .isInstanceOf(NullPointerException.class);
     }
 }

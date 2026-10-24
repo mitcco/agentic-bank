@@ -130,7 +130,7 @@ class ExternalTransferSagaServiceImplTest {
       .thenAnswer(call -> Optional.ofNullable(stored.get(call.<String>getArgument(0))));
 
     service = new ExternalTransferSagaServiceImpl(accountRepository, externalRepository, fraudCheck, notification,
-      clearingHouse, new TransactionTemplate(transactionManager));
+      clearingHouse, new TransactionTemplate(transactionManager), new RecordingMetricsOutPort());
   }
 
   // ------------------------------------------------------------------ helpers

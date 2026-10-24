@@ -1,0 +1,501 @@
+{
+  "uid": "bank-business",
+  "title": "Bank - Business",
+  "tags": [
+    "bank"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Bonifici",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "title": "Richieste al minuto per tipo ed esito",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (type, status) (rate(bank_transfer_requests_total{application=\"transfer\"}[5m])) * 60",
+          "legendFormat": "{{type}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Esito restituito al client dal POST, una volta per richiesta riuscita. SENT e UNKNOWN non sono stati finali."
+    },
+    {
+      "id": 3,
+      "title": "Bonifici conclusi (ultima ora) per stato",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (round(increase(bank_transfer_concluded_total{application=\"transfer\"}[1h])))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Bonifici arrivati davvero a COMPLETED o REJECTED (una riga nell'outbox per bonifico). Valori arrotondati: increase() estrapola ai bordi della finestra e darebbe decimali per eventi interi.",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 4,
+      "title": "Conclusi al minuto per tipo e stato",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (type, status) (rate(bank_transfer_concluded_total{application=\"transfer\"}[5m])) * 60",
+          "legendFormat": "{{type}} {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Bonifici conclusi al minuto, per tipo (INTERNAL/EXTERNAL) e stato finale."
+    },
+    {
+      "id": 5,
+      "title": "Quota di rifiuti",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 9,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(bank_transfer_concluded_total{application=\"transfer\",status=\"REJECTED\"}[5m])) / sum(rate(bank_transfer_concluded_total{application=\"transfer\"}[5m]))",
+          "legendFormat": "rifiuti",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "description": "Rifiuti sul totale dei bonifici conclusi. Senza traffico il rapporto e 0/0 = NaN e Grafana mostra \"No data\": e atteso."
+    },
+    {
+      "id": 6,
+      "title": "Esterni con esito incerto al minuto",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 17,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(bank_transfer_requests_total{application=\"transfer\",type=\"EXTERNAL\",status=\"UNKNOWN\"}[5m])) * 60",
+          "legendFormat": "UNKNOWN",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Bonifici esterni per cui l'invio alla stanza ha avuto un esito incerto (fondi addebitati, in attesa di esito)."
+    },
+    {
+      "id": 7,
+      "type": "row",
+      "title": "Outbox",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 25,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 8,
+      "title": "Notifiche in attesa",
+      "type": "stat",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "max(bank_transfer_outbox_pending{application=\"transfer\"})",
+          "legendFormat": "in attesa",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 10
+              },
+              {
+                "color": "red",
+                "value": 100
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "description": "Righe nella tabella outbox. Prima della prima lettura vale NaN. Con piu istanze si usa max: ognuna riporta lo stesso conteggio globale.",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value"
+      }
+    },
+    {
+      "id": 9,
+      "title": "Notifiche pubblicate al minuto",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 26,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(bank_transfer_outbox_published_total{application=\"transfer\"}[5m])) * 60",
+          "legendFormat": "pubblicate",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Notifiche confermate dal broker. Con un errore tra conferma e cancellazione la riga viene ripubblicata e contata di nuovo."
+    },
+    {
+      "id": 10,
+      "type": "row",
+      "title": "Riconciliazione",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 34,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 11,
+      "title": "Esiti della riconciliazione (15 minuti)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (outcome) (round(increase(bank_transfer_reconciliations_total{application=\"transfer\"}[15m])))",
+          "legendFormat": "{{outcome}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 60
+          }
+        },
+        "overrides": []
+      },
+      "description": "Un esito per ogni bonifico esaminato: COMPLETED, REJECTED, NOT_FOUND, SKIPPED, FAILED. Valori arrotondati: increase() estrapola ai bordi della finestra e darebbe decimali per eventi interi."
+    },
+    {
+      "id": 12,
+      "title": "Rimborsi per causa (ultima ora)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 35,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (cause) (round(increase(bank_transfer_refunds_total{application=\"transfer\"}[1h])))",
+          "legendFormat": "{{cause}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Riaccrediti del mittente di bonifici esterni gia addebitati, per causa. Valori arrotondati: increase() estrapola ai bordi della finestra e darebbe decimali per eventi interi.",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "row",
+      "title": "Antifrode",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 43,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 14,
+      "title": "Valutazioni al minuto per esito",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (status) (rate(bank_fraud_assessments_total{application=\"fraud\"}[5m])) * 60",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Valutazioni del servizio antifrode al minuto, per esito."
+    },
+    {
+      "id": 15,
+      "title": "Quota di rifiuti antifrode",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 44,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(rate(bank_fraud_assessments_total{application=\"fraud\",status=\"REJECTED\"}[5m])) / sum(rate(bank_fraud_assessments_total{application=\"fraud\"}[5m]))",
+          "legendFormat": "rifiuti",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "description": "Rifiuti antifrode sul totale delle valutazioni. Senza traffico il rapporto e 0/0 = NaN e Grafana mostra \"No data\": e atteso."
+    },
+    {
+      "id": 16,
+      "title": "Motivi di rifiuto (ultima ora)",
+      "type": "bargauge",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 52,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (reason) (round(increase(bank_fraud_reasons_total{application=\"fraud\"}[1h])))",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "description": "Motivi dei rifiuti antifrode. Una valutazione puo avere piu motivi. Valori arrotondati: increase() estrapola ai bordi della finestra e darebbe decimali per eventi interi.",
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    }
+  ]
+}

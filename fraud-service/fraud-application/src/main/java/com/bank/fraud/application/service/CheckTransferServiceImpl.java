@@ -5,6 +5,7 @@ import com.bank.fraud.application.dto.FraudCheckResponseDto;
 import com.bank.fraud.application.exception.InvalidFraudCheckRequestException;
 import com.bank.fraud.application.port.in.CheckTransferInPort;
 import com.bank.fraud.application.port.out.BlockedIbanOutPort;
+import com.bank.fraud.application.port.out.MetricsOutPort;
 import com.bank.fraud.domain.FraudAssessment;
 import com.bank.fraud.domain.FraudPolicy;
 import com.bank.fraud.domain.Iban;
@@ -23,9 +24,13 @@ public class CheckTransferServiceImpl implements CheckTransferInPort {
     private final BlockedIbanOutPort blockedIbanOutPort;
     private final FraudPolicy policy;
 
-    public CheckTransferServiceImpl(BlockedIbanOutPort blockedIbanOutPort, BigDecimal threshold) {
+    private final MetricsOutPort metricsOutPort;
+
+    public CheckTransferServiceImpl(BlockedIbanOutPort blockedIbanOutPort, BigDecimal threshold,
+                                    MetricsOutPort metricsOutPort) {
         this.blockedIbanOutPort = Objects.requireNonNull(blockedIbanOutPort, "blockedIbanOutPort");
         this.policy = new FraudPolicy(new Money(threshold, TransferToAssess.SUPPORTED_CURRENCY));
+        this.metricsOutPort = Objects.requireNonNull(metricsOutPort, "metricsOutPort");
     }
 
     @Override
@@ -45,6 +50,7 @@ public class CheckTransferServiceImpl implements CheckTransferInPort {
         Set<Iban> blocked = Objects.requireNonNull(blockedIbanOutPort.findBlocked(toCheck), "blocked IBANs");
 
         FraudAssessment assessment = policy.assess(transfer, blocked::contains);
+        metricsOutPort.assessmentCompleted(assessment.status(), assessment.reasons());
 
         return new FraudCheckResponseDto(
                 assessment.transferId(),

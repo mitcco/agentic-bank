@@ -20,9 +20,16 @@ public class WebExceptionHandler {
 
   private static final URI TRANSFERS_INSTANCE = URI.create("/transfers");
 
+  private static final URI ACCOUNTS_INSTANCE = URI.create("/accounts");
+
+  /**
+   * The instance is fixed: Spring would otherwise fill it with the requested path, which contains the IBAN.
+   */
   @ExceptionHandler(AccountNotFoundException.class)
   public ProblemDetail handleAccountNotFound(AccountNotFoundException e) {
-    return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    problem.setInstance(ACCOUNTS_INSTANCE);
+    return problem;
   }
 
   @ExceptionHandler(InsufficientFundException.class)

@@ -28,6 +28,6 @@ public class AccountReadOnlyInServiceImpl implements AccountReadOnlyInPort {
     if (accountOpt.isPresent()) {
       return mapper.accountToAccountDto(accountOpt.get());
     }
-    throw new AccountNotFoundException(String.format("No account found for iban %s", iban));
+    throw new AccountNotFoundException("Account not found");
   }
 }

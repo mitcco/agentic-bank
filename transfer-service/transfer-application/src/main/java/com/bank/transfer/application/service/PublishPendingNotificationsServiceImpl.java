@@ -4,9 +4,11 @@ import com.bank.transfer.application.dto.PendingNotificationDto;
 import com.bank.transfer.application.dto.PublishFailureStageEnum;
 import com.bank.transfer.application.dto.PublishResultDto;
 import com.bank.transfer.application.port.in.PublishPendingNotificationsInPort;
+import com.bank.transfer.application.port.out.MetricsOutPort;
 import com.bank.transfer.application.port.out.NotificationSenderOutPort;
 import com.bank.transfer.application.port.out.PendingNotificationOutPort;
 import java.util.List;
+import java.util.Objects;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -14,11 +16,13 @@ public class PublishPendingNotificationsServiceImpl implements PublishPendingNot
 
   private final PendingNotificationOutPort pendingNotificationOutPort;
   private final NotificationSenderOutPort notificationSenderOutPort;
+  private final MetricsOutPort metricsOutPort;
 
   public PublishPendingNotificationsServiceImpl(PendingNotificationOutPort pendingNotificationOutPort,
-    NotificationSenderOutPort notificationSenderOutPort) {
+    NotificationSenderOutPort notificationSenderOutPort, MetricsOutPort metricsOutPort) {
     this.pendingNotificationOutPort = pendingNotificationOutPort;
     this.notificationSenderOutPort = notificationSenderOutPort;
+    this.metricsOutPort = Objects.requireNonNull(metricsOutPort, "metricsOutPort");
   }
 
   @Override
@@ -35,6 +39,7 @@ public class PublishPendingNotificationsServiceImpl implements PublishPendingNot
         return new PublishResultDto(rows.size(), sent, row.transferId(), PublishFailureStageEnum.SEND);
       }
       sent++;
+      metricsOutPort.notificationPublished();
       try {
         pendingNotificationOutPort.delete(row.id());
       } catch (RuntimeException e) {

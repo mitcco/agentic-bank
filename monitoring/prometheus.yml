@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+
+# I servizi girano come container (profilo `apps` di docker-compose.yaml) e si raggiungono
+# per nome sulla rete di Compose: nessuna dipendenza dall'IP o dal firewall dell'host.
+scrape_configs:
+  - job_name: transfer
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["transfer:8080"]
+        labels: { runtime: container }
+  - job_name: fraud
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["fraud:8081"]
+        labels: { runtime: container }

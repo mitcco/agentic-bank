@@ -47,7 +47,7 @@ java -jar notification-service/notification-bootstrap/target/notification-bootst
 java -jar transfer-service/transfer-bootstrap/target/transfer-bootstrap-0.0.1-SNAPSHOT.jar
 ```
 
-To enable notifications and external transfers, first of all you have to enable 2 properties setted false as default. 
+To enable notifications and external transfers when you run the services from the IDE or the terminal, first of all you have to enable 2 properties setted false as default (the `apps` containers of the Compose file already start with both on). 
 Run configuration with Environment variables or in PowerShell:
 
 ```
@@ -75,6 +75,23 @@ curl localhost:8080/accounts/IT60X0542811101000000000001          # balance for 
 `docker compose up -d` will be run also the tests on PostgreSQL, Kafka e MongoDB.
 
 **Stop it:** `docker compose down` (add `-v` to delete data).
+
+## Monitoring (Prometheus + Grafana)
+
+Transfer and Fraud expose their metrics on `/actuator/prometheus`. Notification is not monitored (it has no web server).
+Services and monitoring are opt-in Compose profiles, so one command is enough, with nothing installed but Docker
+(the images are built inside Docker, no Java or Maven needed):
+
+```
+docker compose --profile apps --profile monitoring up -d --build
+```
+
+- Prometheus: http://localhost:9090 (targets: http://localhost:9090/targets)
+- Grafana: http://localhost:3000 (`admin` / `admin_dev`, or `GRAFANA_ADMIN_PASSWORD`)
+
+Prometheus reaches the containers by name (`transfer:8080`, `fraud:8081`) on the Compose network, so it works on any
+machine, with no dependency on the host IP or firewall. Metrics are collected only from the containers: a service started
+from the IDE is not scraped (and it would clash with the container on ports 8080 and 8081).
 
 ## Technical chooses
 
@@ -107,8 +124,8 @@ Notifications and clearing house are async.
 
 | Variable | Default | Role |
 |---|---|---|
-| `NOTIFICATION_PUBLISHER_ENABLED` | `false` | Transfer sends outbox to Kafka |
-| `CLEARING_OUTCOMES_ENABLED` | `false` | turn on the scheduler for clearing house |
+| `NOTIFICATION_PUBLISHER_ENABLED` | `false` (`true` in the `apps` container) | Transfer sends outbox to Kafka |
+| `CLEARING_OUTCOMES_ENABLED` | `false` (`true` in the `apps` container) | turn on the scheduler for clearing house |
 | `CLEARING_SIMULATOR_MODE` | `ACCEPT` | clearing house behaviour: `ACCEPT`, `REJECT`, `UNAVAILABLE`, `TIMEOUT_THEN_ACCEPT`, `TIMEOUT_THEN_REJECT` |
 | `TRANSFER_BANK_CODE` | `05428` | Internal bank ABI: ABI != external transfer |
 | `TRANSFER_DEMO_DATA_ENABLED` | `true` | load demo data on startup |

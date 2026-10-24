@@ -73,7 +73,7 @@ class CreateTransferServiceImplTest {
   @BeforeEach
   void setUp() {
     service = new CreateTransferServiceImpl(accountRepository, transferRepository, fraudCheck, notification,
-      new TransactionTemplate(transactionManager));
+      new TransactionTemplate(transactionManager), new RecordingMetricsOutPort());
   }
 
   private static Account account(String id, Iban iban, String amount, String currency) {
